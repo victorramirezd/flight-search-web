@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flight Search</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f7f4;
+        --panel: #ffffff;
+        --text: #1f2420;
+        --muted: #5d665f;
+        --line: #d9ded6;
+        --accent: #146b4d;
+        --accent-dark: #0f533c;
+        --error: #9f1d2b;
+        --warning: #765019;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 32px 0 48px;
+      }
+
+      header {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 20px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.15;
+        font-weight: 720;
+      }
+
+      .status {
+        min-height: 24px;
+        color: var(--muted);
+        font-size: 14px;
+        text-align: right;
+      }
+
+      form {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 14px;
+        padding: 18px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      input,
+      button {
+        font: inherit;
+      }
+
+      input {
+        width: 100%;
+        height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0 11px;
+        color: var(--text);
+        background: #fff;
+      }
+
+      input:focus {
+        border-color: var(--accent);
+        outline: 3px solid rgba(20, 107, 77, 0.14);
+      }
+
+      .wide {
+        grid-column: span 2;
+      }
+
+      .checkbox {
+        align-items: center;
+        display: flex;
+        gap: 9px;
+        min-height: 42px;
+        padding-top: 18px;
+      }
+
+      .checkbox input {
+        width: 18px;
+        height: 18px;
+      }
+
+      .actions {
+        grid-column: span 2;
+        display: flex;
+        align-items: end;
+        gap: 10px;
+      }
+
+      button {
+        height: 42px;
+        border: 0;
+        border-radius: 6px;
+        padding: 0 18px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: var(--accent-dark);
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.65;
+      }
+
+      .message {
+        margin-top: 16px;
+        min-height: 22px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .message.error {
+        color: var(--error);
+      }
+
+      .message.warning {
+        color: var(--warning);
+      }
+
+      .results {
+        margin-top: 18px;
+        overflow-x: auto;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 1120px;
+      }
+
+      th,
+      td {
+        padding: 11px 12px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+        font-size: 13px;
+      }
+
+      th {
+        color: var(--muted);
+        background: #fbfcfa;
+        font-size: 12px;
+        font-weight: 750;
+        white-space: nowrap;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .price {
+        font-weight: 760;
+        white-space: nowrap;
+      }
+
+      .route {
+        min-width: 180px;
+      }
+
+      .segments {
+        min-width: 260px;
+      }
+
+      @media (max-width: 900px) {
+        header {
+          align-items: start;
+          flex-direction: column;
+        }
+
+        .status {
+          text-align: left;
+        }
+
+        form {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .wide,
+        .actions {
+          grid-column: span 2;
+        }
+      }
+
+      @media (max-width: 560px) {
+        main {
+          width: min(100vw - 20px, 1180px);
+          padding-top: 20px;
+        }
+
+        form {
+          grid-template-columns: 1fr;
+        }
+
+        .wide,
+        .actions {
+          grid-column: span 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Flight Search</h1>
+        <div class="status" id="status"></div>
+      </header>
+
+      <form id="searchForm">
+        <label>
+          Password
+          <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <label>
+          Origin
+          <input name="origin" value="MIL" maxlength="3" required />
+        </label>
+        <label>
+          Destination
+          <input name="destination" value="LIM" maxlength="3" required />
+        </label>
+        <label>
+          Target date
+          <input name="target_date" type="date" value="2026-08-10" required />
+        </label>
+        <label>
+          Date flex days
+          <input name="date_flex_days" type="number" min="0" value="4" required />
+        </label>
+        <label>
+          Adults
+          <input name="adults" type="number" min="1" value="1" required />
+        </label>
+        <label>
+          Min duration
+          <input name="min_duration" type="number" min="1" value="13" required />
+        </label>
+        <label>
+          Max duration
+          <input name="max_duration" type="number" min="1" value="17" required />
+        </label>
+        <label>
+          Min layovers
+          <input name="min_connections_per_slice" type="number" min="0" value="0" required />
+        </label>
+        <label>
+          Max layovers
+          <input name="max_connections_per_slice" type="number" min="0" value="2" required />
+        </label>
+        <label>
+          Offers per query
+          <input name="max_results_per_query" type="number" min="1" value="20" required />
+        </label>
+        <label class="checkbox">
+          <input name="one_way" type="checkbox" />
+          One way
+        </label>
+        <div class="actions">
+          <button id="searchButton" type="submit">Search</button>
+        </div>
+      </form>
+
+      <div id="message" class="message"></div>
+      <section class="results" id="results" hidden></section>
+    </main>
+
+    <script>
+      const form = document.querySelector("#searchForm");
+      const button = document.querySelector("#searchButton");
+      const message = document.querySelector("#message");
+      const results = document.querySelector("#results");
+      const status = document.querySelector("#status");
+
+      const columns = [
+        ["departure_date", "Departure"],
+        ["best_return_date", "Return"],
+        ["best_price", "Price"],
+        ["currency", "Currency"],
+        ["airlines", "Airlines"],
+        ["airports", "Airports"],
+        ["flight_segments", "Flight segments"],
+        ["layovers", "Layovers"],
+        ["total_duration", "Duration"],
+        ["mode", "Mode"],
+      ];
+
+      function formPayload() {
+        const data = new FormData(form);
+        return {
+          password: data.get("password"),
+          origin: data.get("origin"),
+          destination: data.get("destination"),
+          target_date: data.get("target_date"),
+          date_flex_days: Number(data.get("date_flex_days")),
+          adults: Number(data.get("adults")),
+          min_duration: Number(data.get("min_duration")),
+          max_duration: Number(data.get("max_duration")),
+          min_connections_per_slice: Number(data.get("min_connections_per_slice")),
+          max_connections_per_slice: Number(data.get("max_connections_per_slice")),
+          max_results_per_query: Number(data.get("max_results_per_query")),
+          one_way: data.get("one_way") === "on",
+        };
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function renderTable(rows, oneWay) {
+        const activeColumns = oneWay ? columns.filter(([key]) => key !== "best_return_date") : columns;
+        const head = activeColumns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("");
+        const body = rows
+          .map((row) => {
+            const cells = activeColumns
+              .map(([key]) => {
+                const className =
+                  key === "best_price"
+                    ? "price"
+                    : key === "airports"
+                      ? "route"
+                      : key === "flight_segments"
+                        ? "segments"
+                        : "";
+                return `<td class="${className}">${escapeHtml(row[key] ?? "N/A")}</td>`;
+              })
+              .join("");
+            return `<tr>${cells}</tr>`;
+          })
+          .join("");
+
+        results.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+        results.hidden = false;
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        message.className = "message";
+        message.textContent = "Searching...";
+        status.textContent = "";
+        results.hidden = true;
+        results.innerHTML = "";
+
+        try {
+          const response = await fetch("/api/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(formPayload()),
+          });
+          const payload = await response.json();
+
+          if (!response.ok) {
+            throw new Error(payload.error || "Search failed.");
+          }
+
+          renderTable(payload.rows || [], Boolean(payload.one_way));
+          const count = payload.rows?.length || 0;
+          message.textContent = count === 1 ? "1 departure searched." : `${count} departures searched.`;
+          if (payload.mode_warning) {
+            status.textContent = "Duffel test mode";
+            message.className = "message warning";
+          }
+        } catch (error) {
+          message.className = "message error";
+          message.textContent = error.message;
+        } finally {
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

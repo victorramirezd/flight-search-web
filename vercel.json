@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/**/*.py": {
+    "api/search.py": {
       "maxDuration": 60
     }
   }

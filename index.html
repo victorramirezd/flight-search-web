@@ -330,7 +330,7 @@
           password: data.get("password"),
           origin: data.get("origin"),
           destination: data.get("destination"),
-          target_date: data.get("target_date"),
+          target_date: normalizeDate(data.get("target_date")),
           date_flex_days: Number(data.get("date_flex_days")),
           adults: Number(data.get("adults")),
           min_duration: Number(data.get("min_duration")),
@@ -340,6 +340,21 @@
           max_results_per_query: Number(data.get("max_results_per_query")),
           one_way: data.get("one_way") === "on",
         };
+      }
+
+      function normalizeDate(value) {
+        const text = String(value || "").trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+          return text;
+        }
+
+        const slashDate = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (slashDate) {
+          const [, day, month, year] = slashDate;
+          return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+        }
+
+        return text;
       }
 
       function escapeHtml(value) {

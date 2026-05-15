@@ -28,6 +28,10 @@ def json_response(handler: BaseHTTPRequestHandler, status_code: int, payload: Di
     handler.wfile.write(body)
 
 
+def clean_access_token(token: str) -> str:
+    return token.strip().strip('"').strip("'")
+
+
 def parse_int(data: Dict[str, Any], key: str, default: int) -> int:
     value = data.get(key, default)
     if value == "" or value is None:
@@ -58,7 +62,7 @@ class handler(BaseHTTPRequestHandler):
             json_response(self, 401, {"error": "Incorrect password."})
             return
 
-        token = os.getenv("DUFFEL_ACCESS_TOKEN")
+        token = clean_access_token(os.getenv("DUFFEL_ACCESS_TOKEN", ""))
         if not token:
             json_response(self, 500, {"error": "DUFFEL_ACCESS_TOKEN is not configured on the server."})
             return

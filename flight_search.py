@@ -74,12 +74,21 @@ def api_error_message(response: requests.Response) -> str:
             continue
         title = error.get("title")
         message = error.get("message")
+        source = error.get("source")
+        pointer = source.get("pointer") if isinstance(source, dict) else None
+
+        details = []
+        if pointer:
+            details.append(str(pointer))
         if title and message:
-            messages.append(f"{title}: {message}")
+            details.append(f"{title}: {message}")
         elif message:
-            messages.append(message)
+            details.append(str(message))
         elif title:
-            messages.append(title)
+            details.append(str(title))
+
+        if details:
+            messages.append(" - ".join(details))
 
     return "; ".join(messages) if messages else response.text[:300]
 

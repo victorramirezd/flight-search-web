@@ -717,6 +717,11 @@
         const payload = formPayload();
         const target = new Date(`${payload.target_date}T00:00:00`);
         const flexDays = Number.isFinite(payload.date_flex_days) ? payload.date_flex_days : 0;
+        const durationCount = payload.one_way
+          ? 1
+          : Math.max(payload.max_duration - payload.min_duration + 1, 0);
+        const departureCount = flexDays * 2 + 1;
+        const queryCount = departureCount * durationCount;
         if (Number.isNaN(target.getTime())) {
           timelineRange.textContent = "Choose a target date";
           timelineStart.textContent = "";
@@ -731,7 +736,7 @@
         end.setDate(target.getDate() + flexDays);
         timelineRange.textContent = `${formatShortDate(start)} to ${formatShortDate(end)}`;
         timelineStart.textContent = formatShortDate(start);
-        timelineTarget.textContent = formatShortDate(target);
+        timelineTarget.textContent = `${formatShortDate(target)} (${queryCount} Duffel calls)`;
         timelineEnd.textContent = formatShortDate(end);
       }
 

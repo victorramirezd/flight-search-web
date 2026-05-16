@@ -18,6 +18,8 @@ import requests
 
 DUFFEL_OFFER_REQUESTS_URL = "https://api.duffel.com/air/offer_requests"
 DUFFEL_API_VERSION = "v2"
+DUFFEL_REQUEST_INTERVAL_SECONDS = 1.1
+MAX_RATE_LIMIT_SLEEP_SECONDS = 65
 
 
 @dataclass(frozen=True)
@@ -407,6 +409,26 @@ class DuffelClient:
     def __init__(self, access_token: str, session: Optional[requests.Session] = None) -> None:
         self.access_token = access_token
         self.session = session or requests.Session()
+        self.last_request_at = 0.0
+
+    def wait_for_request_slot(self) -> None:
+        elapsed = time.monotonic() - self.last_request_at
+        remaining = DUFFEL_REQUEST_INTERVAL_SECONDS - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+
+    def rate_limit_sleep_seconds(self, response: requests.Response, attempt: int) -> int:
+        header_value = response.headers.get("Retry-After") or response.headers.get("ratelimit-reset")
+        if header_value:
+            try:
+                seconds = int(float(header_value))
+            except ValueError:
+                seconds = 2
+        else:
+            seconds = 2
+
+        seconds = max(seconds, 2) + attempt
+        return min(seconds, MAX_RATE_LIMIT_SLEEP_SECONDS)
 
     def search_offers(
         self,
@@ -451,6 +473,7 @@ class DuffelClient:
         }
 
         for attempt in range(retries + 1):
+            self.wait_for_request_slot()
             response = self.session.post(
                 DUFFEL_OFFER_REQUESTS_URL,
                 params={"return_offers": "true"},
@@ -458,6 +481,7 @@ class DuffelClient:
                 headers=headers,
                 timeout=45,
             )
+            self.last_request_at = time.monotonic()
 
             if response.status_code in (200, 201):
                 response_payload = response.json()
@@ -470,17 +494,8 @@ class DuffelClient:
                 return cheapest_offers(offers, max_results)
 
             if response.status_code == 429:
-                retry_after_header = response.headers.get("Retry-After") or response.headers.get(
-                    "ratelimit-reset", "2"
-                )
-                try:
-                    retry_after_seconds = int(retry_after_header)
-                except ValueError:
-                    retry_after_seconds = 2
-
                 if attempt < retries:
-                    sleep_seconds = retry_after_seconds * (attempt + 1)
-                    time.sleep(sleep_seconds)
+                    time.sleep(self.rate_limit_sleep_seconds(response, attempt))
                     continue
 
                 raise RateLimitError(

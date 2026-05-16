@@ -13,7 +13,7 @@ if str(ROOT_DIR) not in sys.path:
 
 import requests
 
-from flight_search import ApiError, DuffelClient, RateLimitError, build_search_config, run_search
+from flight_search import ApiError, DuffelClient, RateLimitError, build_search_config, iter_search_rows
 
 
 SEARCH_PASSWORD = "per" + "u"
@@ -26,6 +26,12 @@ def json_response(handler: BaseHTTPRequestHandler, status_code: int, payload: Di
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def stream_event(handler: BaseHTTPRequestHandler, payload: Dict[str, Any]) -> None:
+    line = json.dumps(payload).encode("utf-8") + b"\n"
+    handler.wfile.write(line)
+    handler.wfile.flush()
 
 
 def clean_access_token(token: str) -> str:
@@ -85,27 +91,35 @@ class handler(BaseHTTPRequestHandler):
             json_response(self, 400, {"error": str(err)})
             return
 
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+        rows = []
         try:
-            rows = run_search(DuffelClient(token), config)
+            stream_event(
+                self,
+                {
+                    "type": "start",
+                    "one_way": config.one_way,
+                    "mode_warning": token.startswith("duffel_test_"),
+                },
+            )
+            for row in iter_search_rows(DuffelClient(token), config):
+                rows.append(row)
+                stream_event(self, {"type": "row", "row": row, "searched": len(rows)})
         except RateLimitError as err:
-            json_response(self, 429, {"error": str(err)})
+            stream_event(self, {"type": "error", "error": str(err), "status": 429})
             return
         except ApiError as err:
-            json_response(self, 502, {"error": str(err)})
+            stream_event(self, {"type": "error", "error": str(err), "status": 502})
             return
         except requests.RequestException as err:
-            json_response(self, 502, {"error": f"Network error while contacting Duffel: {err}"})
+            stream_event(self, {"type": "error", "error": f"Network error while contacting Duffel: {err}", "status": 502})
             return
 
-        json_response(
-            self,
-            200,
-            {
-                "rows": rows,
-                "one_way": config.one_way,
-                "mode_warning": token.startswith("duffel_test_"),
-            },
-        )
+        stream_event(self, {"type": "done", "rows": rows, "searched": len(rows)})
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)

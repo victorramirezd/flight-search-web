@@ -3,19 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Flight Search</title>
+    <title>Alpaca Travelling</title>
     <style>
       :root {
         color-scheme: light;
-        --bg: #f6f7f4;
+        --bg: #f4f1e8;
         --panel: #ffffff;
-        --text: #1f2420;
-        --muted: #5d665f;
-        --line: #d9ded6;
-        --accent: #146b4d;
-        --accent-dark: #0f533c;
+        --text: #20231f;
+        --muted: #667064;
+        --line: #d9d5c8;
+        --accent: #116149;
+        --accent-dark: #0c4937;
+        --accent-soft: #e2efe8;
+        --ink: #26322b;
+        --gold: #b88528;
         --error: #9f1d2b;
         --warning: #765019;
+        --shadow: 0 18px 45px rgba(42, 48, 39, 0.08);
       }
 
       * {
@@ -24,30 +28,84 @@
 
       body {
         margin: 0;
-        background: var(--bg);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 220px),
+          var(--bg);
         color: var(--text);
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
       main {
-        width: min(1180px, calc(100vw - 32px));
+        width: min(1220px, calc(100vw - 32px));
         margin: 0 auto;
-        padding: 32px 0 48px;
+        padding: 28px 0 48px;
       }
 
       header {
         display: flex;
-        align-items: end;
+        align-items: center;
         justify-content: space-between;
-        gap: 16px;
-        margin-bottom: 20px;
+        gap: 18px;
+        margin-bottom: 22px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .logo-mark {
+        position: relative;
+        display: grid;
+        width: 46px;
+        height: 46px;
+        place-items: center;
+        border: 2px solid var(--ink);
+        border-radius: 7px;
+        background: #fffaf0;
+        color: var(--ink);
+        font-size: 15px;
+        font-weight: 850;
+        letter-spacing: 0;
+      }
+
+      .logo-mark::before,
+      .logo-mark::after {
+        position: absolute;
+        top: -10px;
+        width: 12px;
+        height: 20px;
+        border: 2px solid var(--ink);
+        border-bottom: 0;
+        border-radius: 10px 10px 2px 2px;
+        background: #fffaf0;
+        content: "";
+      }
+
+      .logo-mark::before {
+        left: 7px;
+        transform: rotate(-16deg);
+      }
+
+      .logo-mark::after {
+        right: 7px;
+        transform: rotate(16deg);
       }
 
       h1 {
         margin: 0;
-        font-size: 28px;
-        line-height: 1.15;
-        font-weight: 720;
+        font-size: 30px;
+        line-height: 1.05;
+        font-weight: 820;
+      }
+
+      .domain {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 680;
       }
 
       .status {
@@ -62,9 +120,10 @@
         grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: 14px;
         padding: 18px;
-        background: var(--panel);
+        background: rgba(255, 255, 255, 0.92);
         border: 1px solid var(--line);
         border-radius: 8px;
+        box-shadow: var(--shadow);
       }
 
       label {
@@ -72,7 +131,30 @@
         gap: 6px;
         color: var(--muted);
         font-size: 12px;
-        font-weight: 650;
+        font-weight: 700;
+      }
+
+      .field-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .info-button {
+        display: inline-grid;
+        width: 20px;
+        height: 20px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        padding: 0;
+        background: #fbfaf5;
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 850;
+        line-height: 1;
+        cursor: pointer;
       }
 
       input,
@@ -92,11 +174,7 @@
 
       input:focus {
         border-color: var(--accent);
-        outline: 3px solid rgba(20, 107, 77, 0.14);
-      }
-
-      .wide {
-        grid-column: span 2;
+        outline: 3px solid rgba(17, 97, 73, 0.14);
       }
 
       .checkbox {
@@ -119,24 +197,38 @@
         gap: 10px;
       }
 
-      button {
+      button.primary {
         height: 42px;
         border: 0;
         border-radius: 6px;
-        padding: 0 18px;
+        padding: 0 20px;
         background: var(--accent);
         color: #fff;
-        font-weight: 700;
+        font-weight: 780;
         cursor: pointer;
       }
 
-      button:hover {
+      button.primary:hover {
         background: var(--accent-dark);
       }
 
-      button:disabled {
+      button.primary:disabled {
         cursor: wait;
-        opacity: 0.65;
+        opacity: 0.68;
+      }
+
+      .help-popover {
+        position: fixed;
+        z-index: 10;
+        width: min(280px, calc(100vw - 28px));
+        padding: 12px 13px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fffdf8;
+        box-shadow: var(--shadow);
+        color: var(--text);
+        font-size: 13px;
+        line-height: 1.4;
       }
 
       .message {
@@ -160,12 +252,13 @@
         background: var(--panel);
         border: 1px solid var(--line);
         border-radius: 8px;
+        box-shadow: var(--shadow);
       }
 
       table {
         width: 100%;
         border-collapse: collapse;
-        min-width: 1120px;
+        min-width: 1160px;
       }
 
       th,
@@ -179,9 +272,9 @@
 
       th {
         color: var(--muted);
-        background: #fbfcfa;
+        background: #fbfaf5;
         font-size: 12px;
-        font-weight: 750;
+        font-weight: 780;
         white-space: nowrap;
       }
 
@@ -190,16 +283,44 @@
       }
 
       .price {
-        font-weight: 760;
+        font-weight: 790;
         white-space: nowrap;
       }
 
       .route {
-        min-width: 180px;
+        min-width: 210px;
       }
 
       .segments {
-        min-width: 260px;
+        min-width: 300px;
+      }
+
+      .results.is-searching tbody tr {
+        background: #ede8db;
+        color: #3e453e;
+        filter: blur(0.35px);
+      }
+
+      .results.is-searching tbody tr:hover {
+        filter: none;
+      }
+
+      .airline-link {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        border-radius: 6px;
+        padding: 0 10px;
+        background: var(--accent-soft);
+        color: var(--accent-dark);
+        font-size: 12px;
+        font-weight: 780;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .airline-link:hover {
+        background: #cfe3d9;
       }
 
       @media (max-width: 900px) {
@@ -216,7 +337,6 @@
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        .wide,
         .actions {
           grid-column: span 2;
         }
@@ -224,15 +344,14 @@
 
       @media (max-width: 560px) {
         main {
-          width: min(100vw - 20px, 1180px);
-          padding-top: 20px;
+          width: min(100vw - 20px, 1220px);
+          padding-top: 22px;
         }
 
         form {
           grid-template-columns: 1fr;
         }
 
-        .wide,
         .actions {
           grid-column: span 1;
         }
@@ -242,66 +361,110 @@
   <body>
     <main>
       <header>
-        <h1>Flight Search</h1>
+        <div class="brand">
+          <div class="logo-mark" aria-hidden="true">AT</div>
+          <div>
+            <h1>Alpaca Travelling</h1>
+            <div class="domain">alpaca-travelling.com</div>
+          </div>
+        </div>
         <div class="status" id="status"></div>
       </header>
 
       <form id="searchForm">
         <label>
-          Password
+          <span class="field-title">Password <button class="info-button" type="button" data-help="Private access password for this flight search tool.">i</button></span>
           <input name="password" type="password" autocomplete="current-password" required />
         </label>
         <label>
-          Origin
-          <input name="origin" value="MIL" maxlength="3" required />
+          <span class="field-title">Origin <button class="info-button" type="button" data-help="Choose a city or airport code where the trip starts. City codes like MIL search nearby airports.">i</button></span>
+          <input name="origin" value="MIL" list="airportOptions" maxlength="3" required />
         </label>
         <label>
-          Destination
-          <input name="destination" value="LIM" maxlength="3" required />
+          <span class="field-title">Destination <button class="info-button" type="button" data-help="Choose the city or airport code where you want to arrive.">i</button></span>
+          <input name="destination" value="LIM" list="airportOptions" maxlength="3" required />
         </label>
         <label>
-          Target date
+          <span class="field-title">Target date <button class="info-button" type="button" data-help="The center of the departure window. The search checks days before and after this date.">i</button></span>
           <input name="target_date" type="date" value="2026-08-10" required />
         </label>
         <label>
-          Date flex days
+          <span class="field-title">Date flex days <button class="info-button" type="button" data-help="How many days before and after the target date should be searched. Four means a nine-day window.">i</button></span>
           <input name="date_flex_days" type="number" min="0" value="4" required />
         </label>
         <label>
-          Adults
+          <span class="field-title">Adults <button class="info-button" type="button" data-help="Number of adult passengers included in the offer search.">i</button></span>
           <input name="adults" type="number" min="1" value="1" required />
         </label>
         <label>
-          Min duration
+          <span class="field-title">Min duration <button class="info-button" type="button" data-help="Shortest round-trip length in days. Ignored for one-way searches.">i</button></span>
           <input name="min_duration" type="number" min="1" value="13" required />
         </label>
         <label>
-          Max duration
+          <span class="field-title">Max duration <button class="info-button" type="button" data-help="Longest round-trip length in days. The search tries each duration in the range.">i</button></span>
           <input name="max_duration" type="number" min="1" value="17" required />
         </label>
         <label>
-          Min layovers
+          <span class="field-title">Min layovers <button class="info-button" type="button" data-help="Minimum connections allowed per outbound or return slice. Use 1 to exclude nonstop-looking test results.">i</button></span>
           <input name="min_connections_per_slice" type="number" min="0" value="0" required />
         </label>
         <label>
-          Max layovers
+          <span class="field-title">Max layovers <button class="info-button" type="button" data-help="Maximum connections allowed per outbound or return slice. Two means up to two layovers each way.">i</button></span>
           <input name="max_connections_per_slice" type="number" min="0" value="2" required />
         </label>
         <label>
-          Offers per query
+          <span class="field-title">Offers per query <button class="info-button" type="button" data-help="How many Duffel offers to inspect for each date combination before choosing the cheapest valid one.">i</button></span>
           <input name="max_results_per_query" type="number" min="1" value="20" required />
         </label>
         <label class="checkbox">
           <input name="one_way" type="checkbox" />
-          One way
+          <span class="field-title">One way <button class="info-button" type="button" data-help="Search only outbound flights and ignore trip duration fields.">i</button></span>
         </label>
         <div class="actions">
-          <button id="searchButton" type="submit">Search</button>
+          <button class="primary" id="searchButton" type="submit">Search</button>
         </div>
       </form>
 
+      <datalist id="airportOptions">
+        <option value="MIL" label="Milan, Italy - all airports"></option>
+        <option value="MXP" label="Milan Malpensa, Italy"></option>
+        <option value="LIN" label="Milan Linate, Italy"></option>
+        <option value="BGY" label="Milan Bergamo, Italy"></option>
+        <option value="LIM" label="Lima, Peru - Jorge Chavez"></option>
+        <option value="CUZ" label="Cusco, Peru"></option>
+        <option value="JFK" label="New York JFK, United States"></option>
+        <option value="LGA" label="New York LaGuardia, United States"></option>
+        <option value="EWR" label="Newark, United States"></option>
+        <option value="NYC" label="New York City - all airports"></option>
+        <option value="MIA" label="Miami, United States"></option>
+        <option value="FLL" label="Fort Lauderdale, United States"></option>
+        <option value="LAX" label="Los Angeles, United States"></option>
+        <option value="SFO" label="San Francisco, United States"></option>
+        <option value="ORD" label="Chicago O'Hare, United States"></option>
+        <option value="DFW" label="Dallas Fort Worth, United States"></option>
+        <option value="ATL" label="Atlanta, United States"></option>
+        <option value="MAD" label="Madrid, Spain"></option>
+        <option value="BCN" label="Barcelona, Spain"></option>
+        <option value="CDG" label="Paris Charles de Gaulle, France"></option>
+        <option value="ORY" label="Paris Orly, France"></option>
+        <option value="LHR" label="London Heathrow, United Kingdom"></option>
+        <option value="LGW" label="London Gatwick, United Kingdom"></option>
+        <option value="AMS" label="Amsterdam, Netherlands"></option>
+        <option value="FRA" label="Frankfurt, Germany"></option>
+        <option value="MUC" label="Munich, Germany"></option>
+        <option value="FCO" label="Rome Fiumicino, Italy"></option>
+        <option value="IST" label="Istanbul, Turkiye"></option>
+        <option value="BOG" label="Bogota, Colombia"></option>
+        <option value="PTY" label="Panama City, Panama"></option>
+        <option value="MEX" label="Mexico City, Mexico"></option>
+        <option value="GRU" label="Sao Paulo Guarulhos, Brazil"></option>
+        <option value="SCL" label="Santiago, Chile"></option>
+        <option value="EZE" label="Buenos Aires Ezeiza, Argentina"></option>
+      </datalist>
+
       <div id="message" class="message"></div>
       <section class="results" id="results" hidden></section>
+      <div class="help-popover" id="helpPopover" hidden></div>
     </main>
 
     <script>
@@ -310,6 +473,7 @@
       const message = document.querySelector("#message");
       const results = document.querySelector("#results");
       const status = document.querySelector("#status");
+      const helpPopover = document.querySelector("#helpPopover");
 
       const columns = [
         ["departure_date", "Departure"],
@@ -321,15 +485,15 @@
         ["flight_segments", "Flight segments"],
         ["layovers", "Layovers"],
         ["total_duration", "Duration"],
-        ["mode", "Mode"],
+        ["airline_url", "Book"],
       ];
 
       function formPayload() {
         const data = new FormData(form);
         return {
           password: data.get("password"),
-          origin: data.get("origin"),
-          destination: data.get("destination"),
+          origin: airportCode(data.get("origin")),
+          destination: airportCode(data.get("destination")),
           target_date: normalizeDate(data.get("target_date")),
           date_flex_days: Number(data.get("date_flex_days")),
           adults: Number(data.get("adults")),
@@ -340,6 +504,10 @@
           max_results_per_query: Number(data.get("max_results_per_query")),
           one_way: data.get("one_way") === "on",
         };
+      }
+
+      function airportCode(value) {
+        return String(value || "").trim().slice(0, 3).toUpperCase();
       }
 
       function normalizeDate(value) {
@@ -366,7 +534,18 @@
           .replaceAll("'", "&#039;");
       }
 
-      function renderTable(rows, oneWay) {
+      function renderCell(row, key) {
+        if (key === "airline_url") {
+          if (!row.airline_url || row.airline_url === "N/A") {
+            return "N/A";
+          }
+          return `<a class="airline-link" href="${escapeHtml(row.airline_url)}" target="_blank" rel="noopener">Airline site</a>`;
+        }
+
+        return escapeHtml(row[key] ?? "N/A");
+      }
+
+      function renderTable(rows, oneWay, searching = false) {
         const activeColumns = oneWay ? columns.filter(([key]) => key !== "best_return_date") : columns;
         const head = activeColumns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("");
         const body = rows
@@ -381,7 +560,7 @@
                       : key === "flight_segments"
                         ? "segments"
                         : "";
-                return `<td class="${className}">${escapeHtml(row[key] ?? "N/A")}</td>`;
+                return `<td class="${className}">${renderCell(row, key)}</td>`;
               })
               .join("");
             return `<tr>${cells}</tr>`;
@@ -389,38 +568,112 @@
           .join("");
 
         results.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+        results.classList.toggle("is-searching", searching);
         results.hidden = false;
+      }
+
+      function showHelp(buttonElement) {
+        const rect = buttonElement.getBoundingClientRect();
+        helpPopover.textContent = buttonElement.dataset.help;
+        helpPopover.hidden = false;
+        const left = Math.min(rect.left, window.innerWidth - helpPopover.offsetWidth - 14);
+        helpPopover.style.left = `${Math.max(14, left)}px`;
+        helpPopover.style.top = `${rect.bottom + 8}px`;
+      }
+
+      document.addEventListener("click", (event) => {
+        const infoButton = event.target.closest(".info-button");
+        if (infoButton) {
+          event.preventDefault();
+          showHelp(infoButton);
+          return;
+        }
+
+        if (!event.target.closest(".help-popover")) {
+          helpPopover.hidden = true;
+        }
+      });
+
+      async function readStreamingResponse(response, oneWay) {
+        if (!response.body) {
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error || "Search failed.");
+          }
+          return payload.rows || [];
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const rows = [];
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.trim()) {
+              continue;
+            }
+            const event = JSON.parse(line);
+            if (event.type === "start" && event.mode_warning) {
+              status.textContent = "Duffel test mode";
+            }
+            if (event.type === "row") {
+              rows.push(event.row);
+              renderTable(rows, oneWay, true);
+              message.textContent = `Searching... ${event.searched} departure${event.searched === 1 ? "" : "s"} checked.`;
+            }
+            if (event.type === "error") {
+              throw new Error(event.error || "Search failed.");
+            }
+            if (event.type === "done") {
+              renderTable(rows, oneWay, false);
+              return rows;
+            }
+          }
+
+          if (done) {
+            renderTable(rows, oneWay, false);
+            return rows;
+          }
+        }
       }
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
+        const payload = formPayload();
         button.disabled = true;
         message.className = "message";
         message.textContent = "Searching...";
         status.textContent = "";
         results.hidden = true;
+        results.classList.remove("is-searching");
         results.innerHTML = "";
 
         try {
           const response = await fetch("/api/search", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(formPayload()),
+            body: JSON.stringify(payload),
           });
-          const payload = await response.json();
 
           if (!response.ok) {
-            throw new Error(payload.error || "Search failed.");
+            const errorPayload = await response.json();
+            throw new Error(errorPayload.error || "Search failed.");
           }
 
-          renderTable(payload.rows || [], Boolean(payload.one_way));
-          const count = payload.rows?.length || 0;
+          const rows = await readStreamingResponse(response, Boolean(payload.one_way));
+          const count = rows.length;
           message.textContent = count === 1 ? "1 departure searched." : `${count} departures searched.`;
-          if (payload.mode_warning) {
-            status.textContent = "Duffel test mode";
+          if (status.textContent) {
             message.className = "message warning";
           }
         } catch (error) {
+          results.classList.remove("is-searching");
           message.className = "message error";
           message.textContent = error.message;
         } finally {

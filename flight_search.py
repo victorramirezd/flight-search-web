@@ -48,6 +48,7 @@ class OfferSummary:
     layovers: str
     total_duration: str
     mode: str
+    airline_url: str
 
 
 class ApiError(Exception):
@@ -226,6 +227,12 @@ def offer_airports(offer: dict) -> str:
             route.append(airport_label(first_origin))
 
         for segment in segments:
+            origin = segment.get("origin")
+            if isinstance(origin, dict):
+                origin_label = airport_label(origin)
+                if route and route[-1] != origin_label:
+                    route.append(f"change airport to {origin_label}")
+
             destination = segment.get("destination")
             if isinstance(destination, dict):
                 route.append(airport_label(destination))
@@ -294,12 +301,55 @@ def segment_route(segment: dict) -> str:
 
 def offer_flight_segments(offer: dict) -> str:
     segment_details = []
+    previous_destination: Optional[str] = None
 
     for segment in offer_segments(offer):
+        origin = segment.get("origin")
+        origin_label = airport_label(origin) if isinstance(origin, dict) else "unknown"
+        if previous_destination and previous_destination != origin_label:
+            segment_details.append(f"Airport change: {previous_destination} -> {origin_label}")
+
         flight_code = segment_flight_code(segment) or "N/A"
         segment_details.append(f"{segment_route(segment)}: {flight_code}")
 
+        destination = segment.get("destination")
+        previous_destination = airport_label(destination) if isinstance(destination, dict) else None
+
     return "; ".join(segment_details) if segment_details else "N/A"
+
+
+AIRLINE_WEBSITES = {
+    "AA": "https://www.aa.com/",
+    "AC": "https://www.aircanada.com/",
+    "AF": "https://wwws.airfrance.us/",
+    "AM": "https://aeromexico.com/",
+    "AV": "https://www.avianca.com/",
+    "BA": "https://www.britishairways.com/",
+    "CM": "https://www.copaair.com/",
+    "DL": "https://www.delta.com/",
+    "IB": "https://www.iberia.com/",
+    "KL": "https://www.klm.com/",
+    "LA": "https://www.latamairlines.com/",
+    "LH": "https://www.lufthansa.com/",
+    "UA": "https://www.united.com/",
+    "UX": "https://www.aireuropa.com/",
+}
+
+
+def offer_airline_url(offer: dict) -> str:
+    for segment in offer_segments(offer):
+        for carrier_key in ("marketing_carrier", "operating_carrier"):
+            carrier = segment.get(carrier_key)
+            code = carrier_code(carrier)
+            if code and code in AIRLINE_WEBSITES:
+                return AIRLINE_WEBSITES[code]
+
+    first_airline = offer_airlines(offer)
+    if first_airline and first_airline != "N/A":
+        search_term = first_airline.split(",")[0].strip().replace(" ", "+")
+        return f"https://www.google.com/search?q={search_term}+official+airline+website"
+
+    return "https://www.google.com/travel/flights"
 
 
 def offer_layovers(offer: dict) -> str:
@@ -486,6 +536,7 @@ def best_offer_summary(
                 layovers=offer_layovers(offer),
                 total_duration=offer_total_duration(offer),
                 mode=offer_mode(offer),
+                airline_url=offer_airline_url(offer),
             )
 
     return best_summary
@@ -551,9 +602,7 @@ def build_search_config(
     )
 
 
-def run_search(client: DuffelClient, config: SearchConfig) -> List[Dict[str, str]]:
-    rows: List[Dict[str, str]] = []
-
+def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dict[str, str]]:
     for dep_date in date_range(config.target_date, config.date_flex_days):
         if config.one_way:
             return_dates = [None]
@@ -614,6 +663,7 @@ def run_search(client: DuffelClient, config: SearchConfig) -> List[Dict[str, str
             row["total_duration"] = summary.total_duration
             row["mode"] = summary.mode
             row["best_offer_id"] = summary.offer_id
+            row["airline_url"] = summary.airline_url
             if not config.one_way:
                 row["best_return_date"] = best_for_departure[1].isoformat()
         else:
@@ -627,11 +677,15 @@ def run_search(client: DuffelClient, config: SearchConfig) -> List[Dict[str, str
             row["total_duration"] = "N/A"
             row["mode"] = "N/A"
             row["best_offer_id"] = "N/A"
+            row["airline_url"] = ""
             if not config.one_way:
                 row["best_return_date"] = "N/A"
 
-        rows.append(row)
+        yield row
 
+
+def run_search(client: DuffelClient, config: SearchConfig) -> List[Dict[str, str]]:
+    rows = list(iter_search_rows(client, config))
     return rows
 
 
@@ -680,6 +734,7 @@ def write_csv(rows: List[Dict[str, str]], csv_path: str, one_way: bool) -> None:
             "total_duration",
             "mode",
             "best_offer_id",
+            "airline_url",
         ]
     )
 

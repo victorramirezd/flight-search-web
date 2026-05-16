@@ -379,6 +379,12 @@
         background: rgba(32, 35, 31, 0.44);
       }
 
+      .modal-backdrop[hidden],
+      .help-popover[hidden],
+      .results[hidden] {
+        display: none;
+      }
+
       .redirect-modal {
         width: min(440px, 100%);
         border: 1px solid var(--line);
@@ -733,11 +739,13 @@
         pendingRedirectUrl = url;
         redirectDestination.textContent = `Destination: ${url}`;
         redirectModal.hidden = false;
+        redirectModal.setAttribute("aria-hidden", "false");
       }
 
       function hideRedirectModal() {
         pendingRedirectUrl = "";
         redirectModal.hidden = true;
+        redirectModal.setAttribute("aria-hidden", "true");
       }
 
       async function loadAirports() {
@@ -794,6 +802,7 @@
       });
 
       form.addEventListener("input", updateTimeline);
+      hideRedirectModal();
 
       async function readStreamingResponse(response, oneWay) {
         if (!response.body) {

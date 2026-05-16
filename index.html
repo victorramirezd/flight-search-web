@@ -57,41 +57,13 @@
       }
 
       .logo-mark {
-        position: relative;
-        display: grid;
-        width: 46px;
-        height: 46px;
-        place-items: center;
-        border: 2px solid var(--ink);
-        border-radius: 7px;
+        display: block;
+        width: 58px;
+        height: 58px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
         background: #fffaf0;
-        color: var(--ink);
-        font-size: 15px;
-        font-weight: 850;
-        letter-spacing: 0;
-      }
-
-      .logo-mark::before,
-      .logo-mark::after {
-        position: absolute;
-        top: -10px;
-        width: 12px;
-        height: 20px;
-        border: 2px solid var(--ink);
-        border-bottom: 0;
-        border-radius: 10px 10px 2px 2px;
-        background: #fffaf0;
-        content: "";
-      }
-
-      .logo-mark::before {
-        left: 7px;
-        transform: rotate(-16deg);
-      }
-
-      .logo-mark::after {
-        right: 7px;
-        transform: rotate(16deg);
+        object-fit: cover;
       }
 
       h1 {
@@ -124,6 +96,78 @@
         border: 1px solid var(--line);
         border-radius: 8px;
         box-shadow: var(--shadow);
+      }
+
+      .timeline-panel {
+        margin-top: 14px;
+        padding: 16px 18px;
+        background: rgba(255, 255, 255, 0.86);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+      }
+
+      .timeline-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 720;
+      }
+
+      .timeline-range {
+        color: var(--text);
+        font-weight: 780;
+        text-align: right;
+      }
+
+      .timeline-track {
+        position: relative;
+        height: 12px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e3dfd2;
+      }
+
+      .timeline-bar {
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #b88528, #116149);
+        transform-origin: center;
+        animation: rangePulse 2.4s ease-in-out infinite;
+      }
+
+      .timeline-ticks {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .timeline-ticks span:nth-child(2) {
+        text-align: center;
+      }
+
+      .timeline-ticks span:nth-child(3) {
+        text-align: right;
+      }
+
+      @keyframes rangePulse {
+        0%,
+        100% {
+          opacity: 0.82;
+          transform: scaleX(0.985);
+        }
+
+        50% {
+          opacity: 1;
+          transform: scaleX(1);
+        }
       }
 
       label {
@@ -309,18 +353,85 @@
         display: inline-flex;
         align-items: center;
         min-height: 32px;
+        border: 0;
         border-radius: 6px;
         padding: 0 10px;
         background: var(--accent-soft);
         color: var(--accent-dark);
         font-size: 12px;
         font-weight: 780;
+        cursor: pointer;
         text-decoration: none;
         white-space: nowrap;
       }
 
       .airline-link:hover {
         background: #cfe3d9;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background: rgba(32, 35, 31, 0.44);
+      }
+
+      .redirect-modal {
+        width: min(440px, 100%);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 20px;
+        background: #fffdf8;
+        box-shadow: 0 24px 70px rgba(32, 35, 31, 0.24);
+      }
+
+      .modal-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+        font-weight: 820;
+      }
+
+      .modal-brand img {
+        width: 42px;
+        height: 42px;
+        border-radius: 7px;
+        object-fit: cover;
+      }
+
+      .redirect-modal h2 {
+        margin: 0 0 8px;
+        font-size: 20px;
+        line-height: 1.2;
+      }
+
+      .redirect-modal p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .secondary {
+        height: 40px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0 14px;
+        background: #fff;
+        color: var(--text);
+        font-weight: 760;
+        cursor: pointer;
       }
 
       @media (max-width: 900px) {
@@ -362,7 +473,7 @@
     <main>
       <header>
         <div class="brand">
-          <div class="logo-mark" aria-hidden="true">AT</div>
+          <img class="logo-mark" src="/logo.png" alt="Alpaca Travelling logo" />
           <div>
             <h1>Alpaca Travelling</h1>
             <div class="domain">alpaca-travelling.com</div>
@@ -378,11 +489,11 @@
         </label>
         <label>
           <span class="field-title">Origin <button class="info-button" type="button" data-help="Choose a city or airport code where the trip starts. City codes like MIL search nearby airports.">i</button></span>
-          <input name="origin" value="MIL" list="airportOptions" maxlength="3" required />
+          <input name="origin" value="MIL" list="airportOptions" required />
         </label>
         <label>
           <span class="field-title">Destination <button class="info-button" type="button" data-help="Choose the city or airport code where you want to arrive.">i</button></span>
-          <input name="destination" value="LIM" list="airportOptions" maxlength="3" required />
+          <input name="destination" value="LIM" list="airportOptions" required />
         </label>
         <label>
           <span class="field-title">Target date <button class="info-button" type="button" data-help="The center of the departure window. The search checks days before and after this date.">i</button></span>
@@ -425,46 +536,45 @@
         </div>
       </form>
 
-      <datalist id="airportOptions">
-        <option value="MIL" label="Milan, Italy - all airports"></option>
-        <option value="MXP" label="Milan Malpensa, Italy"></option>
-        <option value="LIN" label="Milan Linate, Italy"></option>
-        <option value="BGY" label="Milan Bergamo, Italy"></option>
-        <option value="LIM" label="Lima, Peru - Jorge Chavez"></option>
-        <option value="CUZ" label="Cusco, Peru"></option>
-        <option value="JFK" label="New York JFK, United States"></option>
-        <option value="LGA" label="New York LaGuardia, United States"></option>
-        <option value="EWR" label="Newark, United States"></option>
-        <option value="NYC" label="New York City - all airports"></option>
-        <option value="MIA" label="Miami, United States"></option>
-        <option value="FLL" label="Fort Lauderdale, United States"></option>
-        <option value="LAX" label="Los Angeles, United States"></option>
-        <option value="SFO" label="San Francisco, United States"></option>
-        <option value="ORD" label="Chicago O'Hare, United States"></option>
-        <option value="DFW" label="Dallas Fort Worth, United States"></option>
-        <option value="ATL" label="Atlanta, United States"></option>
-        <option value="MAD" label="Madrid, Spain"></option>
-        <option value="BCN" label="Barcelona, Spain"></option>
-        <option value="CDG" label="Paris Charles de Gaulle, France"></option>
-        <option value="ORY" label="Paris Orly, France"></option>
-        <option value="LHR" label="London Heathrow, United Kingdom"></option>
-        <option value="LGW" label="London Gatwick, United Kingdom"></option>
-        <option value="AMS" label="Amsterdam, Netherlands"></option>
-        <option value="FRA" label="Frankfurt, Germany"></option>
-        <option value="MUC" label="Munich, Germany"></option>
-        <option value="FCO" label="Rome Fiumicino, Italy"></option>
-        <option value="IST" label="Istanbul, Turkiye"></option>
-        <option value="BOG" label="Bogota, Colombia"></option>
-        <option value="PTY" label="Panama City, Panama"></option>
-        <option value="MEX" label="Mexico City, Mexico"></option>
-        <option value="GRU" label="Sao Paulo Guarulhos, Brazil"></option>
-        <option value="SCL" label="Santiago, Chile"></option>
-        <option value="EZE" label="Buenos Aires Ezeiza, Argentina"></option>
-      </datalist>
+      <section class="timeline-panel" aria-label="Departure date search window">
+        <div class="timeline-head">
+          <span>Departure window</span>
+          <span class="timeline-range" id="timelineRange"></span>
+        </div>
+        <div class="timeline-track">
+          <div class="timeline-bar"></div>
+        </div>
+        <div class="timeline-ticks">
+          <span id="timelineStart"></span>
+          <span id="timelineTarget"></span>
+          <span id="timelineEnd"></span>
+        </div>
+      </section>
+
+      <datalist id="airportOptions"></datalist>
 
       <div id="message" class="message"></div>
       <section class="results" id="results" hidden></section>
       <div class="help-popover" id="helpPopover" hidden></div>
+      <div class="modal-backdrop" id="redirectModal" hidden>
+        <div class="redirect-modal" role="dialog" aria-modal="true" aria-labelledby="redirectTitle">
+          <div class="modal-brand">
+            <img src="/logo.png" alt="" />
+            <span>Alpaca Travelling</span>
+          </div>
+          <h2 id="redirectTitle">Redirecting out of Alpaca Travelling</h2>
+          <p>
+            You are leaving alpaca-travelling.com and going to a third-party airline website.
+            Any booking, payment, contract terms, privacy choices, cookies, and customer support
+            will be handled by that airline, not Alpaca Travelling.
+          </p>
+          <p id="redirectDestination"></p>
+          <div class="modal-actions">
+            <button class="secondary" id="cancelRedirect" type="button">Stay here</button>
+            <button class="primary" id="continueRedirect" type="button">Continue</button>
+          </div>
+        </div>
+      </div>
     </main>
 
     <script>
@@ -474,6 +584,16 @@
       const results = document.querySelector("#results");
       const status = document.querySelector("#status");
       const helpPopover = document.querySelector("#helpPopover");
+      const airportOptions = document.querySelector("#airportOptions");
+      const timelineRange = document.querySelector("#timelineRange");
+      const timelineStart = document.querySelector("#timelineStart");
+      const timelineTarget = document.querySelector("#timelineTarget");
+      const timelineEnd = document.querySelector("#timelineEnd");
+      const redirectModal = document.querySelector("#redirectModal");
+      const redirectDestination = document.querySelector("#redirectDestination");
+      const cancelRedirect = document.querySelector("#cancelRedirect");
+      const continueRedirect = document.querySelector("#continueRedirect");
+      let pendingRedirectUrl = "";
 
       const columns = [
         ["departure_date", "Departure"],
@@ -507,7 +627,9 @@
       }
 
       function airportCode(value) {
-        return String(value || "").trim().slice(0, 3).toUpperCase();
+        const text = String(value || "").trim().toUpperCase();
+        const match = text.match(/[A-Z]{3}/);
+        return match ? match[0] : text.slice(0, 3);
       }
 
       function normalizeDate(value) {
@@ -539,7 +661,7 @@
           if (!row.airline_url || row.airline_url === "N/A") {
             return "N/A";
           }
-          return `<a class="airline-link" href="${escapeHtml(row.airline_url)}" target="_blank" rel="noopener">Airline site</a>`;
+          return `<button class="airline-link" type="button" data-airline-url="${escapeHtml(row.airline_url)}">Airline site</button>`;
         }
 
         return escapeHtml(row[key] ?? "N/A");
@@ -581,6 +703,62 @@
         helpPopover.style.top = `${rect.bottom + 8}px`;
       }
 
+      function formatShortDate(date) {
+        return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      }
+
+      function updateTimeline() {
+        const payload = formPayload();
+        const target = new Date(`${payload.target_date}T00:00:00`);
+        const flexDays = Number.isFinite(payload.date_flex_days) ? payload.date_flex_days : 0;
+        if (Number.isNaN(target.getTime())) {
+          timelineRange.textContent = "Choose a target date";
+          timelineStart.textContent = "";
+          timelineTarget.textContent = "";
+          timelineEnd.textContent = "";
+          return;
+        }
+
+        const start = new Date(target);
+        start.setDate(target.getDate() - flexDays);
+        const end = new Date(target);
+        end.setDate(target.getDate() + flexDays);
+        timelineRange.textContent = `${formatShortDate(start)} to ${formatShortDate(end)}`;
+        timelineStart.textContent = formatShortDate(start);
+        timelineTarget.textContent = formatShortDate(target);
+        timelineEnd.textContent = formatShortDate(end);
+      }
+
+      function showRedirectModal(url) {
+        pendingRedirectUrl = url;
+        redirectDestination.textContent = `Destination: ${url}`;
+        redirectModal.hidden = false;
+      }
+
+      function hideRedirectModal() {
+        pendingRedirectUrl = "";
+        redirectModal.hidden = true;
+      }
+
+      async function loadAirports() {
+        try {
+          const response = await fetch("/data/airports.json");
+          if (!response.ok) {
+            throw new Error("Airport list unavailable.");
+          }
+          const airports = await response.json();
+          airportOptions.innerHTML = airports
+            .map((airport) => {
+              const value = `${escapeHtml(airport.code)} - ${escapeHtml(airport.label || airport.name)}`;
+              return `<option value="${value}"></option>`;
+            })
+            .join("");
+          status.textContent = `${airports.length.toLocaleString()} airport and city choices loaded`;
+        } catch (error) {
+          status.textContent = "Airport list unavailable";
+        }
+      }
+
       document.addEventListener("click", (event) => {
         const infoButton = event.target.closest(".info-button");
         if (infoButton) {
@@ -589,10 +767,33 @@
           return;
         }
 
+        const airlineButton = event.target.closest(".airline-link");
+        if (airlineButton) {
+          event.preventDefault();
+          showRedirectModal(airlineButton.dataset.airlineUrl);
+          return;
+        }
+
         if (!event.target.closest(".help-popover")) {
           helpPopover.hidden = true;
         }
       });
+
+      cancelRedirect.addEventListener("click", hideRedirectModal);
+      redirectModal.addEventListener("click", (event) => {
+        if (event.target === redirectModal) {
+          hideRedirectModal();
+        }
+      });
+      continueRedirect.addEventListener("click", () => {
+        const url = pendingRedirectUrl;
+        hideRedirectModal();
+        if (url) {
+          window.open(url, "_blank", "noopener");
+        }
+      });
+
+      form.addEventListener("input", updateTimeline);
 
       async function readStreamingResponse(response, oneWay) {
         if (!response.body) {
@@ -680,6 +881,9 @@
           button.disabled = false;
         }
       });
+
+      loadAirports();
+      updateTimeline();
     </script>
   </body>
 </html>

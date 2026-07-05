@@ -494,7 +494,7 @@
 
       <form id="searchForm">
         <label>
-          <span class="field-title">Password <button class="info-button" type="button" data-help="Private access password for this flight search tool.">i</button></span>
+          <span class="field-title">Who's the most guapo? <button class="info-button" type="button" data-help="Private access question for this flight search tool.">i</button></span>
           <input name="password" type="password" autocomplete="current-password" required />
         </label>
         <label>
@@ -793,15 +793,6 @@
         return `${airport.code} - ${airport.label || airport.name}`;
       }
 
-      function normalizeText(value) {
-        return String(value || "")
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, " ")
-          .trim();
-      }
-
       function airportRank(airport) {
         if (airport.type === "city") {
           return 0;
@@ -815,15 +806,18 @@
         return 3;
       }
 
-      function bestAirportForCity(city) {
-        const normalizedCity = normalizeText(city);
-        if (!normalizedCity) {
-          return null;
-        }
+      function coordinateDistance(latitudeA, longitudeA, latitudeB, longitudeB) {
+        return Math.hypot(latitudeA - latitudeB, longitudeA - longitudeB);
+      }
 
+      function closestAirportChoice(latitude, longitude) {
         return airportChoices
-          .filter((airport) => normalizeText(airport.city) === normalizedCity || normalizeText(airport.name) === normalizedCity)
-          .sort((a, b) => airportRank(a) - airportRank(b) || a.code.localeCompare(b.code))[0] || null;
+          .filter((airport) => Number.isFinite(airport.latitude) && Number.isFinite(airport.longitude))
+          .map((airport) => ({
+            airport,
+            distance: coordinateDistance(latitude, longitude, airport.latitude, airport.longitude),
+          }))
+          .sort((a, b) => a.distance - b.distance || airportRank(a.airport) - airportRank(b.airport) || a.airport.code.localeCompare(b.airport.code))[0]?.airport || null;
       }
 
       function getCurrentPosition() {
@@ -841,37 +835,18 @@
         });
       }
 
-      function cityFromAddress(address) {
-        return address.city || address.town || address.village || address.municipality || address.county || "";
-      }
-
-      async function detectOriginFromLocation() {
+      async function detectOriginFromCoordinates() {
         try {
-          status.textContent = "Detecting origin city...";
+          status.textContent = "Detecting closest origin...";
           const position = await getCurrentPosition();
-          const params = new URLSearchParams({
-            format: "jsonv2",
-            lat: String(position.coords.latitude),
-            lon: String(position.coords.longitude),
-            zoom: "10",
-            addressdetails: "1",
-            "accept-language": "en",
-          });
-          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`);
-          if (!response.ok) {
-            throw new Error("Location lookup failed.");
-          }
-
-          const place = await response.json();
-          const city = cityFromAddress(place.address || {});
-          const airport = bestAirportForCity(city);
+          const airport = closestAirportChoice(position.coords.latitude, position.coords.longitude);
           if (!airport) {
-            status.textContent = city ? `Detected ${city}. Choose an origin airport.` : "Choose an origin airport.";
+            status.textContent = "Choose an origin airport";
             return;
           }
 
           originInput.value = airportOptionValue(airport);
-          status.textContent = `Origin set to ${airport.code} from your location`;
+          status.textContent = `Origin set to ${airport.code} from your coordinates`;
         } catch (error) {
           status.textContent = "Choose an origin airport";
         }
@@ -892,7 +867,7 @@
             })
             .join("");
           status.textContent = `${airports.length.toLocaleString()} airport and city choices loaded`;
-          await detectOriginFromLocation();
+          await detectOriginFromCoordinates();
         } catch (error) {
           status.textContent = "Airport list unavailable";
         }

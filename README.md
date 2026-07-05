@@ -52,15 +52,16 @@ The web app is made of:
 - `index.html`: the browser UI
 - `api/search.py`: the Vercel serverless search endpoint
 - `flight_search.py`: shared Duffel search logic
+- `scripts/enrich_airport_coordinates.py`: enriches the airport option list with coordinates from OurAirports
 - `requirements.txt`: Python dependencies for Vercel
 
 The web search password is currently hardcoded in `api/search.py` as:
 
 ```python
-SEARCH_PASSWORD = "per" + "u"
+SEARCH_PASSWORD = "victor"
 ```
 
-The check is case-insensitive, so `Peru` works in the web form.
+The check is case-insensitive, so `Victor` works in the web form.
 
 Set the Duffel token in Vercel:
 

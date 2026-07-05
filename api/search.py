@@ -16,7 +16,7 @@ import requests
 from flight_search import ApiError, DuffelClient, RateLimitError, build_search_config, iter_search_rows
 
 
-SEARCH_PASSWORD = "per" + "u"
+SEARCH_PASSWORD = "victor"
 
 
 def json_response(handler: BaseHTTPRequestHandler, status_code: int, payload: Dict[str, Any]) -> None:

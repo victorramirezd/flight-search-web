@@ -477,6 +477,11 @@
           grid-column: span 1;
         }
       }
+      .airport-search { position: relative; min-width: 0; }
+      .airport-search input { width: 100%; }
+      .airport-suggestions { position: absolute; top: 100%; left: 0; width: max(100%, 320px); max-width: calc(100vw - 70px); max-height: 300px; overflow-y: auto; z-index: 20; background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 5px; font-size: 14px; }
+      .airport-suggestions [role="option"] { padding: 10px; cursor: pointer; }
+      .airport-suggestions [role="option"]:hover, .airport-suggestions [aria-selected="true"] { background: var(--accent-soft); }
     </style>
   </head>
   <body>
@@ -499,11 +504,11 @@
         </label>
         <label>
           <span class="field-title">Origin <button class="info-button" type="button" data-help="Choose a city or airport code where the trip starts. City codes like MIL search nearby airports.">i</button></span>
-          <input name="origin" list="airportOptions" required />
+          <input name="origin" placeholder="City or airport" required />
         </label>
         <label>
           <span class="field-title">Destination <button class="info-button" type="button" data-help="Choose the city or airport code where you want to arrive.">i</button></span>
-          <input name="destination" value="LIM" list="airportOptions" required />
+          <input name="destination" value="LIM" placeholder="City or airport" required />
         </label>
         <label>
           <span class="field-title">Target date <button class="info-button" type="button" data-help="The center of the departure window. The search checks days before and after this date.">i</button></span>
@@ -561,8 +566,6 @@
         </div>
       </section>
 
-      <datalist id="airportOptions"></datalist>
-
       <div id="message" class="message"></div>
       <section class="results" id="results" hidden></section>
       <div class="help-popover" id="helpPopover" hidden></div>
@@ -587,6 +590,7 @@
       </div>
     </main>
 
+    <script src="/airports.js"></script>
     <script>
       const form = document.querySelector("#searchForm");
       const button = document.querySelector("#searchButton");
@@ -594,7 +598,7 @@
       const results = document.querySelector("#results");
       const status = document.querySelector("#status");
       const helpPopover = document.querySelector("#helpPopover");
-      const airportOptions = document.querySelector("#airportOptions");
+      let airportCatalog = AirportSearch.createCatalog([]);
       const timelineRange = document.querySelector("#timelineRange");
       const timelineStart = document.querySelector("#timelineStart");
       const timelineTarget = document.querySelector("#timelineTarget");
@@ -612,6 +616,7 @@
 
       const columns = [
         ["departure_date", "Departure"],
+        ["search_message", "Search status"],
         ["best_return_date", "Return"],
         ["best_price", "Price"],
         ["currency", "Currency"],
@@ -642,9 +647,79 @@
       }
 
       function airportCode(value) {
-        const text = String(value || "").trim().toUpperCase();
-        const match = text.match(/[A-Z]{3}/);
-        return match ? match[0] : text.slice(0, 3);
+        return airportCatalog.resolve(value)?.code || "";
+      }
+
+      function attachAirportSearch(input) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "airport-search";
+        input.replaceWith(wrapper);
+        wrapper.append(input);
+        const list = document.createElement("div");
+        list.id = `${input.name}-suggestions`;
+        list.className = "airport-suggestions";
+        list.setAttribute("role", "listbox");
+        list.setAttribute("aria-label", `${input.name} suggestions`);
+        list.hidden = true;
+        wrapper.append(list);
+        input.setAttribute("aria-label", input.name === "origin" ? "Origin" : "Destination");
+        input.setAttribute("role", "combobox");
+        input.setAttribute("aria-autocomplete", "list");
+        input.setAttribute("aria-controls", list.id);
+        input.setAttribute("aria-expanded", "false");
+        input.setAttribute("autocomplete", "off");
+        let choices = [];
+        let active = -1;
+        function close() {
+          list.hidden = true;
+          input.setAttribute("aria-expanded", "false");
+          input.removeAttribute("aria-activedescendant");
+          active = -1;
+        }
+        function select(index) {
+          if (!choices[index]) return;
+          input.value = airportOptionValue(choices[index]);
+          input.setCustomValidity("");
+          close();
+          input.dispatchEvent(new Event("change", {bubbles: true}));
+        }
+        function show() {
+          choices = airportCatalog.search(input.value);
+          active = -1;
+          input.removeAttribute("aria-activedescendant");
+          list.replaceChildren();
+          choices.forEach((place, index) => {
+            const option = document.createElement("div");
+            option.id = `${list.id}-${index}`;
+            option.setAttribute("role", "option");
+            option.setAttribute("aria-selected", "false");
+            option.textContent = `${place.city || place.name} (${place.code}) — ${place.type === "city" ? "All airports" : place.name} · ${place.country}`;
+            option.addEventListener("mousedown", event => event.preventDefault());
+            option.addEventListener("click", () => select(index));
+            list.append(option);
+          });
+          if (!choices.length) list.textContent = input.value.trim() ? "No matches. Try a city name or IATA code." : "Type a city, airport or IATA code.";
+          list.hidden = false;
+          input.setAttribute("aria-expanded", "true");
+        }
+        input.addEventListener("input", () => { input.setCustomValidity(""); show(); });
+        input.addEventListener("focus", show);
+        input.addEventListener("blur", close);
+        input.addEventListener("keydown", event => {
+          if (event.key === "Escape") { close(); return; }
+          if (event.key === "Enter" && !list.hidden && active >= 0) {
+            event.preventDefault(); select(active); return;
+          }
+          if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+          event.preventDefault();
+          if (list.hidden) show();
+          if (!choices.length) return;
+          active = active < 0 ? (event.key === "ArrowDown" ? 0 : choices.length - 1)
+            : (active + (event.key === "ArrowDown" ? 1 : -1) + choices.length) % choices.length;
+          [...list.children].forEach((option, index) => option.setAttribute("aria-selected", String(index === active)));
+          input.setAttribute("aria-activedescendant", list.children[active].id);
+          list.children[active].scrollIntoView({block: "nearest"});
+        });
       }
 
       function normalizeDate(value) {
@@ -790,7 +865,7 @@
       }
 
       function airportOptionValue(airport) {
-        return `${airport.code} - ${airport.label || airport.name}`;
+        return AirportSearch.label(airport);
       }
 
       function airportRank(airport) {
@@ -845,6 +920,7 @@
             return;
           }
 
+          if (originInput.value.trim()) return;
           originInput.value = airportOptionValue(airport);
           status.textContent = `Origin set to ${airport.code} from your coordinates`;
         } catch (error) {
@@ -860,12 +936,7 @@
           }
           const airports = await response.json();
           airportChoices = airports;
-          airportOptions.innerHTML = airports
-            .map((airport) => {
-              const value = escapeHtml(airportOptionValue(airport));
-              return `<option value="${value}"></option>`;
-            })
-            .join("");
+          airportCatalog = AirportSearch.createCatalog(airports);
           status.textContent = `${airports.length.toLocaleString()} airport and city choices loaded`;
           await detectOriginFromCoordinates();
         } catch (error) {
@@ -911,7 +982,15 @@
         updateDurationFields();
         updateTimeline();
       });
-      form.addEventListener("input", updateTimeline);
+      function onSearchDetailsChanged() {
+        updateTimeline();
+        if (!results.hidden && !button.disabled) {
+          message.className = "message warning";
+          message.textContent = "Search details changed. Search again to refresh these results.";
+        }
+      }
+      form.addEventListener("input", onSearchDetailsChanged);
+      form.addEventListener("change", onSearchDetailsChanged);
       hideRedirectModal();
 
       async function readStreamingResponse(response, oneWay) {
@@ -965,6 +1044,12 @@
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
+        for (const input of [originInput, form.elements.destination]) {
+          const place = airportCatalog.resolve(input.value);
+          input.setCustomValidity(place ? "" : "Choose a city or airport from the suggestions, or enter its exact IATA code.");
+          if (!input.reportValidity()) return;
+          input.value = airportOptionValue(place);
+        }
         const payload = formPayload();
         button.disabled = true;
         message.className = "message";
@@ -988,8 +1073,9 @@
 
           const rows = await readStreamingResponse(response, Boolean(payload.one_way));
           const count = rows.length;
-          message.textContent = count === 1 ? "1 departure searched." : `${count} departures searched.`;
-          if (status.textContent) {
+          const failures = rows.filter(row => ["partial", "error"].includes(row.search_status)).length;
+          message.textContent = `${count} departure${count === 1 ? "" : "s"} searched.${failures ? ` ${failures} had failed date searches; see Search status.` : ""}`;
+          if (status.textContent || failures) {
             message.className = "message warning";
           }
         } catch (error) {
@@ -1001,6 +1087,7 @@
         }
       });
 
+      [originInput, form.elements.destination].forEach(attachAirportSearch);
       setDefaultTargetDate();
       updateDurationFields();
       loadAirports();

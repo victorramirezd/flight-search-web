@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import re
 import sys
 import time
+from functools import lru_cache
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, List, Optional
@@ -557,6 +560,19 @@ def best_offer_summary(
     return best_summary
 
 
+@lru_cache(maxsize=1)
+def known_location_codes() -> frozenset[str]:
+    with (Path(__file__).parent / "data" / "airports.json").open() as source:
+        return frozenset(place["code"] for place in json.load(source))
+
+
+def validate_location_code(value: str, field: str) -> str:
+    code = value.strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}", code) or code not in known_location_codes():
+        raise ValueError(f"{field} must be a known city or airport IATA code; choose a suggestion (for example, Palermo is PMO)")
+    return code
+
+
 def build_search_config(
     *,
     origin: str,
@@ -572,6 +588,8 @@ def build_search_config(
     max_connections_per_slice: Optional[int] = 2,
     output_csv: Optional[str] = None,
 ) -> SearchConfig:
+    origin = validate_location_code(origin, "origin")
+    destination = validate_location_code(destination, "destination")
     try:
         target = datetime.strptime(target_date, "%Y-%m-%d").date()
     except ValueError as exc:
@@ -629,6 +647,7 @@ def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dic
             ]
 
         best_for_departure: Optional[tuple[OfferSummary, date]] = None
+        query_errors = []
 
         for ret_date in return_dates:
             try:
@@ -643,6 +662,7 @@ def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dic
             except RateLimitError:
                 raise
             except ApiError as err:
+                query_errors.append(str(err))
                 print(
                     f"Warning: query failed for departure {dep_date} "
                     f"return {ret_date}: {err}",
@@ -666,6 +686,16 @@ def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dic
             "destination": config.destination,
             "departure_date": dep_date.isoformat(),
         }
+        if query_errors:
+            row["search_status"] = "partial" if best_for_departure else "error"
+            row["search_message"] = (
+                f"{len(query_errors)} of {len(return_dates)} date searches failed. "
+                + ("Best available price may be incomplete. " if best_for_departure else "Price unavailable. ")
+                + query_errors[0]
+            )
+        else:
+            row["search_status"] = "ok" if best_for_departure else "no_offers"
+            row["search_message"] = "Flights found" if best_for_departure else "No flights match these dates and layover filters."
         if best_for_departure:
             summary = best_for_departure[0]
             row["best_price"] = f"{summary.price:.2f}"

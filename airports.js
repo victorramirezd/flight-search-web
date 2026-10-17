@@ -18,7 +18,7 @@
   function createCatalog(places) {
     const entries = places.map(place => ({place, code: normalize(place.code),
       city: normalize(place.city), name: normalize(place.name),
-      text: normalize([place.code, place.city, place.name, place.country, place.label].join(' '))}));
+      text: normalize([place.code, place.city, place.name, place.country, place.label, ...(place.aliases || [])].join(' '))}));
     const byCode = new Map(entries.map(entry => [entry.code, entry.place]));
     const byLabel = new Map(entries.map(entry => [normalize(label(entry.place)), entry.place]));
     function search(value, limit = 8) {
@@ -50,7 +50,7 @@
       if (!query) return null;
       const exact = byCode.get(query) || byLabel.get(query);
       if (exact) return exact;
-      const matches = entries.filter(entry => entry.city === query || entry.name === query);
+      const matches = entries.filter(entry => entry.city === query || entry.name === query || (entry.place.aliases || []).some(alias => normalize(alias) === query));
       // Ambiguous names require a choice, including cities in different countries.
       if (matches.length === 1) return matches[0].place;
       return null;

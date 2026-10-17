@@ -59,6 +59,8 @@ def load_ourairports_coordinates() -> dict[str, tuple[float, float]]:
 
 def main() -> None:
     airports = json.loads(AIRPORTS_JSON.read_text(encoding="utf-8"))
+    if any(airport.get("duffel_id") for airport in airports):
+        raise SystemExit("This catalog has Duffel validation evidence. Use validate_duffel_catalog.py to refresh it.")
     coordinates_by_code = load_ourairports_coordinates()
 
     enriched = 0

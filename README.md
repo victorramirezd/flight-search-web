@@ -125,3 +125,50 @@ node tests/airports.test.cjs
 ```
 
 Backend tests use a fake provider and do not call Duffel.
+
+## Validate the full catalog against Duffel
+
+`scripts/validate_duffel_catalog.py` downloads every page of Duffel v2's airport
+and city reference lists, then compares every local entry by IATA code, location
+type and country. It does not create flight offer requests or bookings.
+
+Make `DUFFEL_ACCESS_TOKEN` available in your local environment, then run:
+
+```sh
+python scripts/validate_duffel_catalog.py --output work/duffel-catalog
+```
+
+Keep the token out of shell history, source control and reports. The script does
+not automatically load `.env` files. It needs the existing `requests` dependency.
+
+The output contains a complete reference snapshot, per-entry JSON/CSV comparisons,
+a summary with retrieval time and hashes, and a proposed corrected catalog. The
+original catalog is unchanged unless you explicitly add `--write-catalog`.
+A failed download, repeated cursor or missing pagination metadata stops validation
+before it writes a report or changes the catalog.
+
+Confirmed entries use Duffel's airport/city identities and metropolitan membership.
+The validator also reads airports embedded in city records, with top-level airport
+records preferred over duplicate membership aliases. Codes defined only as cities
+are labelled as cities instead of individual airports.
+
+Local coordinates are retained because Duffel's reference geography contains some
+large discrepancies. Differences over 100 km are flagged, with the local name and
+city retained as well. If local coordinates are missing, valid Duffel coordinates
+are used as a fallback. Country conflicts are accepted only when the exact code and
+coordinates within 5 km identify the same airport; the local country is retained
+and Duffel's differing country is explicitly recorded. Distant country/code
+collisions and codes absent from both reference lists are excluded and reported.
+
+Alternate names are retained as search aliases for matching identities, but never
+transferred from an old airport label to a city or across a large coordinate
+conflict. Review exclusions and metadata warnings before applying a catalog.
+
+Validation confirms reference identity, not scheduled service, flight availability
+or bookability. Repeat periodically because provider reference data changes.
+
+The current validation evidence and correction decisions are documented in
+`docs/airport-catalog-validation.md`. The per-entry comparison is in
+`data/airport-validation.csv`, and its summary/hashes are in
+`data/airport-validation.json`. Re-running the older OurAirports coordinate
+utility on the validated catalog is disabled; refresh via this validator instead.

@@ -17,3 +17,8 @@ assert.equal(catalog.search('heathrow')[0].code, 'LHR');
 assert.equal(catalog.search('sao paulo')[0].type, 'city');
 for (const place of places) assert.equal(catalog.resolve(label(place)).code, place.code);
 console.log('Airport mapping, ranking, typo and catalog round-trip checks passed');
+
+const renamed = createCatalog([{code: 'PMO', city: 'Palermo', name: 'Palermo Airport',
+  type: 'large_airport', aliases: ['Falcone Borsellino']}]);
+assert.equal(renamed.search('Falcone Borsellino')[0].code, 'PMO');
+assert.equal(renamed.resolve('Falcone Borsellino').code, 'PMO');

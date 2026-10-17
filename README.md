@@ -104,3 +104,24 @@ vercel --prod
 - The script defaults to `--max-connections-per-slice 2`, excluding offers with more than two layovers in any outbound or return slice.
 - Use `--min-connections-per-slice 1` to exclude direct-looking offers for routes where direct flights should not exist.
 - Keep `.env` and `.venv/` out of Git. They are ignored by `.gitignore`.
+
+## Location search
+
+The web form ranks city, airport-name and IATA matches, with accent normalization and
+limited typo suggestions when there are no direct matches. Choose a suggestion using
+the mouse or Arrow Up/Down and Enter; Escape closes the list. Selected locations use
+compact labels such as `Palermo (PMO)`. Exact known IATA codes and unambiguous names
+also resolve on submission. Ambiguous names require a selection.
+
+Only catalog codes are submitted to Duffel. The catalog is not a guarantee of scheduled
+service or Duffel coverage. The Search status column distinguishes no matching offers
+from failed date searches, and flags incomplete prices when some date searches fail.
+
+Run regression checks with Python 3.12+ and Node.js:
+
+```sh
+python -m unittest discover -s tests
+node tests/airports.test.cjs
+```
+
+Backend tests use a fake provider and do not call Duffel.

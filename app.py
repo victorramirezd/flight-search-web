@@ -10,6 +10,7 @@ from api.search import handler as SearchHandler
 STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
+    "/airports.js": ("airports.js", "text/javascript; charset=utf-8"),
     "/logo.png": ("logo.png", "image/png"),
     "/data/airports.json": ("data/airports.json", "application/json; charset=utf-8"),
 }

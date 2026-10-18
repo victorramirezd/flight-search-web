@@ -265,3 +265,8 @@ experiment. Each pass starts with a new session; within a pass only fresh mode
 replaces the Google session between date pairs. The runner records per-query
 outcomes, pending pairs, session counts and consent overhead without automatic
 retries. It stops on HTTP blocking, consent failures or interrupted streams.
+
+The [18 October session comparison](docs/search-session-experiment-2026-10-18.md)
+did not demonstrate a reliability improvement from fresh sessions; shared remains
+the default. US passes required no consent requests; local fresh sessions incurred
+additional consent submissions and refetches.

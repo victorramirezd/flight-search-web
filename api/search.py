@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -11,9 +12,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import requests
-
-from flight_search import ApiError, DuffelClient, RateLimitError, build_search_config, iter_search_rows
+from flight_search import (ApiError, DuffelClient, RateLimitError, build_search_config, iter_search_rows, search_queries,
+                           validate_retry_queries)
 
 
 SEARCH_PASSWORD = "victor"
@@ -32,10 +32,6 @@ def stream_event(handler: BaseHTTPRequestHandler, payload: Dict[str, Any]) -> No
     line = json.dumps(payload).encode("utf-8") + b"\n"
     handler.wfile.write(line)
     handler.wfile.flush()
-
-
-def clean_access_token(token: str) -> str:
-    return token.strip().strip('"').strip("'")
 
 
 def parse_int(data: Dict[str, Any], key: str, default: int) -> int:
@@ -60,17 +56,14 @@ class handler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", "0"))
             raw_body = self.rfile.read(content_length)
             data = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+            if not isinstance(data, dict):
+                raise ValueError("Expected a JSON object")
         except (ValueError, json.JSONDecodeError):
             json_response(self, 400, {"error": "Invalid JSON request body."})
             return
 
         if str(data.get("password", "")).lower() != SEARCH_PASSWORD:
             json_response(self, 401, {"error": "Incorrect password."})
-            return
-
-        token = clean_access_token(os.getenv("DUFFEL_ACCESS_TOKEN", ""))
-        if not token:
-            json_response(self, 500, {"error": "DUFFEL_ACCESS_TOKEN is not configured on the server."})
             return
 
         try:
@@ -87,8 +80,18 @@ class handler(BaseHTTPRequestHandler):
                 min_connections_per_slice=parse_int(data, "min_connections_per_slice", 0),
                 max_connections_per_slice=parse_int(data, "max_connections_per_slice", 2),
             )
+            currency = data.get("currency")
+            if currency is not None and (not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency)):
+                raise ValueError("currency must be a three-letter currency code")
+            plan = (validate_retry_queries(data["retry_queries"], config)
+                    if "retry_queries" in data else search_queries(config))
         except (TypeError, ValueError) as err:
             json_response(self, 400, {"error": str(err)})
+            return
+
+        token = os.getenv("DUFFEL_ACCESS_TOKEN", "").strip().strip('"').strip("'")
+        if not token:
+            json_response(self, 500, {"error": "DUFFEL_ACCESS_TOKEN is not configured on the server."})
             return
 
         self.send_response(200)
@@ -97,29 +100,46 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         rows = []
+        ledger = {q.payload()["query_id"]: {**q.payload(), "status": "pending", "message": ""}
+                  for q in plan}
+
+        def report_progress(event):
+            ledger[event["query_id"]].update(event)
+            stream_event(self, {"type": "progress", **event})
+
+        def terminal_details():
+            return {"failed_queries": [q for q in ledger.values() if q["status"] == "error"],
+                    "pending_queries": [q for q in ledger.values() if q["status"] == "pending"],
+                    "completed": sum(q["status"] not in {"pending", "running"} for q in ledger.values()),
+                    "total": len(plan)}
+
         try:
             stream_event(
                 self,
                 {
                     "type": "start",
                     "one_way": config.one_way,
+                    "provider": "duffel",
                     "mode_warning": token.startswith("duffel_test_"),
+                    "queries": [q.payload() for q in plan],
+                    "total": len(plan),
+                    "is_retry": "retry_queries" in data,
                 },
             )
-            for row in iter_search_rows(DuffelClient(token), config):
+            client = DuffelClient(token,
+                min_connections=config.min_connections_per_slice,
+                max_connections=config.max_connections_per_slice,
+            )
+            client.currency = currency
+            for row in iter_search_rows(client, config, queries=plan, on_progress=report_progress):
                 rows.append(row)
                 stream_event(self, {"type": "row", "row": row, "searched": len(rows)})
-        except RateLimitError as err:
-            stream_event(self, {"type": "error", "error": str(err), "status": 429})
-            return
         except ApiError as err:
-            stream_event(self, {"type": "error", "error": str(err), "status": 502})
-            return
-        except requests.RequestException as err:
-            stream_event(self, {"type": "error", "error": f"Network error while contacting Duffel: {err}", "status": 502})
+            stream_event(self, {"type": "error", "error": str(err), "status": 429 if isinstance(err, RateLimitError) else 502,
+                                "searched": len(rows), "incomplete": True, **terminal_details()})
             return
 
-        stream_event(self, {"type": "done", "rows": rows, "searched": len(rows)})
+        stream_event(self, {"type": "done", "rows": rows, "searched": len(rows), **terminal_details()})
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)

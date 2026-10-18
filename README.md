@@ -1,6 +1,8 @@
-# Flight Search Tool
+# Flight Search Tool — Duffel alternative
 
-This repository contains a Python flight search script and a Vercel-ready web UI using the **Duffel Flight Offers API**.
+The `duffel-version` branch preserves the **Duffel Flight Offers API** implementation with the latest web UI. The `main` branch uses Google Flights.
+
+This branch requires `DUFFEL_ACCESS_TOKEN`; it does not use the Google Flights scraper.
 
 ## Features
 
@@ -11,6 +13,11 @@ This repository contains a Python flight search script and a Vercel-ready web UI
 - Maximum layover filtering, defaulting to 2 layovers per slice
 - CSV output from the CLI
 - Password-protected web search endpoint
+- Departure and return bars on a shared date scale, with hatched overlap
+- Readable streamed results, spinner, and one progress slot per date combination
+- Departure × return heatmap with each pair's actual cheapest matching fare
+- Repeated manual retries for failed date pairs, retaining earlier successful fares
+- Copy table as HTML/TSV for Excel, with selectable-text fallback
 
 ## Local Setup
 
@@ -39,7 +46,7 @@ export DUFFEL_ACCESS_TOKEN="..."
 python3 flight_search.py \
   --origin MIL \
   --destination LIM \
-  --target-date 2026-08-10 \
+  --target-date 2027-02-04 \
   --date-flex-days 4 \
   --min-duration 13 \
   --max-duration 17
@@ -172,3 +179,46 @@ The current validation evidence and correction decisions are documented in
 `data/airport-validation.csv`, and its summary/hashes are in
 `data/airport-validation.json`. Re-running the older OurAirports coordinate
 utility on the validated catalog is disabled; refresh via this validator instead.
+
+## Updated UI and streaming
+
+The calendar uses departure dates as rows and return dates as columns. It shows the
+lowest returned matching fare for each date pair, with tied minima highlighted.
+One-way searches have a single fare column. Pending, running, empty, and failed
+queries remain distinct. Clicking a price shows all journey slices returned by
+Duffel, the UTC observation time, and an airline website link. These links open
+general websites, not a booking page for the exact offer.
+
+Currency comes from Duffel's account/offer response; there is no currency conversion.
+The client stops on mixed currencies to avoid comparing unlike prices. Retry requests
+retain the currency already displayed. Test-token searches are visibly marked as
+synthetic; their prices and schedules do not establish live availability.
+
+`POST /api/search` emits NDJSON `start`, `progress`, `row`, and `done`/`error` events.
+`start` contains the ordered date-pair plan. Each query emits `running` followed by
+`ok`, `no_offers`, or `error`; successful events include that query's offer summary
+for the calendar. Terminal events include completed/total counts plus failed and
+pending date pairs. Fatal provider/rate-limit/network errors preserve earlier rows
+and mark unattempted combinations as pending.
+
+`retry_queries` accepts a nonempty subset of the original departure/duration grid,
+rejecting duplicates and out-of-range dates. The UI retries only remaining errors
+using the original settings. Manual retries remain available as long as failures
+remain; pending, unattempted combinations require a new search. Existing Duffel
+request pacing and bounded rate-limit/server retries are retained.
+
+Google's self-transfer toggle is provider-specific and is not shown on this branch.
+This branch uses Duffel's flat offer-request API without split-ticket aggregation;
+it does not infer ticket protection from airline counts or airport changes.
+
+Run locally with `python app.py --port 8000` after installing `requests` and setting
+`DUFFEL_ACCESS_TOKEN`. Verify with:
+
+```bash
+python -m unittest discover -s tests
+node tests/airports.test.cjs
+node tests/stream.test.cjs
+node tests/search-ui.test.cjs
+```
+
+HTTP/client tests use deterministic Duffel fixtures and make no paid API calls.

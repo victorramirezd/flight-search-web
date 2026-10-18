@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Flight search automation tool using the Duffel API."""
+"""Flexible flight searches using the Duffel API with streamed query progress."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import math
 import os
 import re
 import sys
 import time
 from functools import lru_cache
 from pathlib import Path
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
-from typing import Dict, Iterable, List, Optional
+from dataclasses import asdict, dataclass
+from datetime import date, datetime, timedelta, timezone
+from typing import Callable, Dict, Iterable, List, Optional, Protocol
 
 import requests
 
@@ -54,14 +55,21 @@ class OfferSummary:
     total_duration: str
     mode: str
     airline_url: str
+    provider: str
+    searched_at: str
+    details_note: str
 
 
 class ApiError(Exception):
-    """Raised for non-recoverable API errors."""
+    """Raised when a flight query cannot return a trustworthy result."""
 
 
-class RateLimitError(ApiError):
-    """Raised when the API rate limit has been reached and retries are exhausted."""
+class ProviderUnavailableError(ApiError):
+    """Stop a pass when the provider cannot safely continue."""
+
+
+class RateLimitError(ProviderUnavailableError):
+    """Stop the pass after Duffel rate-limit recovery is exhausted."""
 
 
 def api_error_message(response: requests.Response) -> str:
@@ -107,6 +115,156 @@ def cheapest_offers(offers: List[dict], limit: int) -> List[dict]:
             return float("inf")
 
     return sorted(offers, key=price_or_infinity)[:limit]
+
+
+class DuffelClient:
+    def __init__(self, access_token: str, session: Optional[requests.Session] = None, *,
+                 min_connections: int = 0, max_connections: Optional[int] = 2) -> None:
+        self.access_token = access_token
+        self.session = session or requests.Session()
+        self.last_request_at = 0.0
+        self.min_connections = min_connections
+        self.max_connections = max_connections
+        self.currency = None
+
+    def wait_for_request_slot(self) -> None:
+        elapsed = time.monotonic() - self.last_request_at
+        remaining = DUFFEL_REQUEST_INTERVAL_SECONDS - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+
+    def rate_limit_sleep_seconds(self, response: requests.Response, attempt: int) -> int:
+        header_value = response.headers.get("Retry-After") or response.headers.get("ratelimit-reset")
+        if header_value:
+            try:
+                seconds = int(float(header_value))
+            except ValueError:
+                seconds = 2
+        else:
+            seconds = 2
+
+        seconds = max(seconds, 2) + attempt
+        return min(seconds, MAX_RATE_LIMIT_SLEEP_SECONDS)
+
+    def search_offers(
+        self,
+        *,
+        origin: str,
+        destination: str,
+        departure_date: date,
+        return_date: Optional[date],
+        adults: int,
+        max_results: int,
+        retries: int = 3,
+    ) -> List[dict]:
+        slices = [
+            {
+                "origin": origin,
+                "destination": destination,
+                "departure_date": departure_date.isoformat(),
+            }
+        ]
+        if return_date:
+            slices.append(
+                {
+                    "origin": destination,
+                    "destination": origin,
+                    "departure_date": return_date.isoformat(),
+                }
+            )
+
+        payload = {
+            "data": {
+                "slices": slices,
+                "passengers": [{"type": "adult"} for _ in range(adults)],
+                "cabin_class": "economy",
+            }
+        }
+
+        if self.max_connections is not None:
+            payload["data"]["max_connections"] = self.max_connections
+
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Duffel-Version": DUFFEL_API_VERSION,
+            "Authorization": f"Bearer {self.access_token}",
+        }
+
+        for attempt in range(retries + 1):
+            self.wait_for_request_slot()
+            try:
+                response = self.session.post(
+                    DUFFEL_OFFER_REQUESTS_URL,
+                    params={"return_offers": "true"}, json=payload, headers=headers, timeout=45,
+                )
+            except requests.RequestException as exc:
+                raise ProviderUnavailableError(f"Network error while contacting Duffel: {exc}") from exc
+            self.last_request_at = time.monotonic()
+
+            if response.status_code in (200, 201):
+                try:
+                    response_payload = response.json()
+                    data = response_payload["data"]
+                    offers = data["offers"]
+                    if not isinstance(offers, list):
+                        raise ValueError("Expected offers list")
+                except (ValueError, KeyError, TypeError) as exc:
+                    raise ProviderUnavailableError("Duffel returned an invalid offers response; availability is unknown.") from exc
+                valid = []
+                observed = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                for offer in offers:
+                    if not isinstance(offer, dict):
+                        continue
+                    try:
+                        price = float(offer["total_amount"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    currency = offer.get("total_currency", "")
+                    if not math.isfinite(price) or price < 0 or not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
+                        continue
+                    # Compare only amounts in the same account currency, without conversion.
+                    if self.currency is not None and currency != self.currency:
+                        raise ProviderUnavailableError("Duffel returned mixed currencies; search stopped to avoid comparing unlike prices.")
+                    self.currency = currency
+                    offer.update(_offer_request_live_mode=data.get("live_mode"),
+                                 _offer_request_id=data.get("id"), _provider="duffel",
+                                 _searched_at=observed,
+                                 _details_note="Duffel itinerary includes all returned journey slices. Airline links open a general website, not this exact fare. Fares can change.")
+                    if offer_meets_min_connections(offer, self.min_connections) and offer_meets_max_connections(offer, self.max_connections):
+                        valid.append(offer)
+                return cheapest_offers(valid, max_results)
+
+            if response.status_code == 429:
+                if attempt < retries:
+                    time.sleep(self.rate_limit_sleep_seconds(response, attempt))
+                    continue
+
+                raise RateLimitError(
+                    "Rate limit reached and retries exhausted. "
+                    f"Last response: {api_error_message(response)}"
+                )
+
+            if 500 <= response.status_code < 600 and attempt < retries:
+                time.sleep(2 * (attempt + 1))
+                continue
+
+            if response.status_code in (401, 403) or response.status_code >= 500:
+                raise ProviderUnavailableError(
+                    f"Duffel search stopped ({response.status_code}): {api_error_message(response)}"
+                )
+            raise ApiError(
+                f"Flight search failed ({response.status_code}): {api_error_message(response)}"
+            )
+
+        raise ApiError("Unexpected retry loop termination")
+
+
+class OfferClient(Protocol):
+    def search_offers(
+        self, *, origin: str, destination: str, departure_date: date,
+        return_date: Optional[date], adults: int, max_results: int,
+    ) -> List[dict]: ...
 
 
 def offer_mode(offer: dict) -> str:
@@ -199,6 +357,8 @@ def offer_segments(offer: dict) -> Iterable[dict]:
 
 
 def offer_airlines(offer: dict) -> str:
+    if offer.get("_airlines"):
+        return offer["_airlines"]
     airlines: List[str] = []
     seen = set()
 
@@ -315,7 +475,12 @@ def offer_flight_segments(offer: dict) -> str:
             segment_details.append(f"Airport change: {previous_destination} -> {origin_label}")
 
         flight_code = segment_flight_code(segment) or "N/A"
-        segment_details.append(f"{segment_route(segment)}: {flight_code}")
+        departing = segment.get("departing_at")
+        arriving = segment.get("arriving_at")
+        if departing and arriving:
+            segment_details.append(f"{segment_route(segment)}: {flight_code} · {departing.replace('T', ' ')} to {arriving.replace('T', ' ')} (local)")
+        else:
+            segment_details.append(f"{segment_route(segment)}: {flight_code}")
 
         destination = segment.get("destination")
         previous_destination = airport_label(destination) if isinstance(destination, dict) else None
@@ -342,6 +507,8 @@ AIRLINE_WEBSITES = {
 
 
 def offer_airline_url(offer: dict) -> str:
+    if offer.get("_search_url"):
+        return offer["_search_url"]
     for segment in offer_segments(offer):
         for carrier_key in ("marketing_carrier", "operating_carrier"):
             carrier = segment.get(carrier_key)
@@ -377,6 +544,8 @@ def offer_layovers(offer: dict) -> str:
 
 
 def offer_total_duration(offer: dict) -> str:
+    if offer.get("_duration_unavailable"):
+        return "N/A"
     total_minutes = 0
     found_duration = False
 
@@ -408,115 +577,6 @@ def offer_total_duration(offer: dict) -> str:
     return format_duration(total_minutes if found_duration else None)
 
 
-class DuffelClient:
-    def __init__(self, access_token: str, session: Optional[requests.Session] = None) -> None:
-        self.access_token = access_token
-        self.session = session or requests.Session()
-        self.last_request_at = 0.0
-
-    def wait_for_request_slot(self) -> None:
-        elapsed = time.monotonic() - self.last_request_at
-        remaining = DUFFEL_REQUEST_INTERVAL_SECONDS - elapsed
-        if remaining > 0:
-            time.sleep(remaining)
-
-    def rate_limit_sleep_seconds(self, response: requests.Response, attempt: int) -> int:
-        header_value = response.headers.get("Retry-After") or response.headers.get("ratelimit-reset")
-        if header_value:
-            try:
-                seconds = int(float(header_value))
-            except ValueError:
-                seconds = 2
-        else:
-            seconds = 2
-
-        seconds = max(seconds, 2) + attempt
-        return min(seconds, MAX_RATE_LIMIT_SLEEP_SECONDS)
-
-    def search_offers(
-        self,
-        *,
-        origin: str,
-        destination: str,
-        departure_date: date,
-        return_date: Optional[date],
-        adults: int,
-        max_results: int,
-        retries: int = 3,
-    ) -> List[dict]:
-        slices = [
-            {
-                "origin": origin,
-                "destination": destination,
-                "departure_date": departure_date.isoformat(),
-            }
-        ]
-        if return_date:
-            slices.append(
-                {
-                    "origin": destination,
-                    "destination": origin,
-                    "departure_date": return_date.isoformat(),
-                }
-            )
-
-        payload = {
-            "data": {
-                "slices": slices,
-                "passengers": [{"type": "adult"} for _ in range(adults)],
-                "cabin_class": "economy",
-            }
-        }
-
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "Duffel-Version": DUFFEL_API_VERSION,
-            "Authorization": f"Bearer {self.access_token}",
-        }
-
-        for attempt in range(retries + 1):
-            self.wait_for_request_slot()
-            response = self.session.post(
-                DUFFEL_OFFER_REQUESTS_URL,
-                params={"return_offers": "true"},
-                json=payload,
-                headers=headers,
-                timeout=45,
-            )
-            self.last_request_at = time.monotonic()
-
-            if response.status_code in (200, 201):
-                response_payload = response.json()
-                data = response_payload.get("data", {})
-                offers = data.get("offers", [])
-                for offer in offers:
-                    if isinstance(offer, dict):
-                        offer["_offer_request_live_mode"] = data.get("live_mode")
-                        offer["_offer_request_id"] = data.get("id")
-                return cheapest_offers(offers, max_results)
-
-            if response.status_code == 429:
-                if attempt < retries:
-                    time.sleep(self.rate_limit_sleep_seconds(response, attempt))
-                    continue
-
-                raise RateLimitError(
-                    "Rate limit reached and retries exhausted. "
-                    f"Last response: {api_error_message(response)}"
-                )
-
-            if 500 <= response.status_code < 600 and attempt < retries:
-                time.sleep(2 * (attempt + 1))
-                continue
-
-            raise ApiError(
-                f"Flight search failed ({response.status_code}): {api_error_message(response)}"
-            )
-
-        raise ApiError("Unexpected retry loop termination")
-
-
 def date_range(center: date, flex_days: int) -> Iterable[date]:
     for offset in range(-flex_days, flex_days + 1):
         yield center + timedelta(days=offset)
@@ -542,6 +602,9 @@ def best_offer_summary(
         except (KeyError, ValueError, TypeError):
             continue
 
+        if not math.isfinite(price) or price < 0:
+            continue
+
         if best_summary is None or price < best_summary.price:
             best_summary = OfferSummary(
                 price=price,
@@ -555,15 +618,27 @@ def best_offer_summary(
                 total_duration=offer_total_duration(offer),
                 mode=offer_mode(offer),
                 airline_url=offer_airline_url(offer),
+                provider=offer.get("_provider", "unknown"),
+                searched_at=offer.get("_searched_at", ""),
+                details_note=offer.get("_details_note", ""),
             )
 
     return best_summary
 
 
 @lru_cache(maxsize=1)
-def known_location_codes() -> frozenset[str]:
+def location_catalog() -> dict[str, dict]:
     with (Path(__file__).parent / "data" / "airports.json").open() as source:
-        return frozenset(place["code"] for place in json.load(source))
+        return {place["code"]: place for place in json.load(source)}
+
+
+def known_location_codes() -> frozenset[str]:
+    return frozenset(location_catalog())
+
+
+def location_airport_codes(code: str) -> frozenset[str]:
+    place = location_catalog()[code]
+    return frozenset(place["airport_codes"]) if place["type"] == "city" else frozenset({code})
 
 
 def validate_location_code(value: str, field: str) -> str:
@@ -595,6 +670,10 @@ def build_search_config(
     except ValueError as exc:
         raise ValueError("target_date must be in YYYY-MM-DD format") from exc
 
+    if target - timedelta(days=max(date_flex_days, 0)) <= date.today():
+        raise ValueError("The entire departure window must be in the future; adjust target_date or date_flex_days")
+    if origin == destination:
+        raise ValueError("origin and destination must be different airports")
     if date_flex_days < 0:
         raise ValueError("date_flex_days must be >= 0")
     if adults < 1:
@@ -635,21 +714,75 @@ def build_search_config(
     )
 
 
-def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dict[str, str]]:
-    for dep_date in date_range(config.target_date, config.date_flex_days):
-        if config.one_way:
-            return_dates = [None]
-        else:
-            assert config.min_duration is not None and config.max_duration is not None
-            return_dates = [
-                dep_date + timedelta(days=d)
-                for d in range(config.min_duration, config.max_duration + 1)
-            ]
+@dataclass(frozen=True)
+class SearchQuery:
+    departure_date: date
+    return_date: Optional[date]
+
+    def payload(self) -> dict:
+        departure = self.departure_date.isoformat()
+        returning = self.return_date.isoformat() if self.return_date else None
+        return {"query_id": f"{departure}|{returning or 'one-way'}",
+                "departure_date": departure, "return_date": returning}
+
+
+def search_queries(config: SearchConfig) -> list[SearchQuery]:
+    return [SearchQuery(departure, None if config.one_way else departure + timedelta(days=duration))
+            for departure in date_range(config.target_date, config.date_flex_days)
+            for duration in ([0] if config.one_way else range(config.min_duration, config.max_duration + 1))]
+
+
+def validate_retry_queries(value, config: SearchConfig) -> list[SearchQuery]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("retry_queries must be a non-empty list of departure/return date pairs")
+    plan = search_queries(config)
+    allowed = {(q.payload()["departure_date"], q.payload()["return_date"]): q for q in plan}
+    selected = set()
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ValueError("Each retry query must be a departure/return date pair")
+        pair = (entry.get("departure_date"), entry.get("return_date"))
+        if not isinstance(pair[0], str) or (pair[1] is not None and not isinstance(pair[1], str)):
+            raise ValueError("Retry dates must be ISO date strings, with null return_date for one-way")
+        if pair not in allowed:
+            raise ValueError("Retry query is outside this search's departure/duration window")
+        if pair in selected:
+            raise ValueError("retry_queries must not contain duplicate date pairs")
+        selected.add(pair)
+    return [q for pair, q in allowed.items() if pair in selected]
+
+
+def iter_search_rows(
+    client: OfferClient, config: SearchConfig, *, queries: Optional[list[SearchQuery]] = None,
+    on_progress: Optional[Callable[[dict], None]] = None,
+) -> Iterable[Dict[str, str]]:
+    plan = search_queries(config) if queries is None else queries
+    completed = 0
+
+    def progress(query: SearchQuery, status: str, message: str = "",
+                 offer: Optional[OfferSummary] = None) -> None:
+        nonlocal completed
+        if status != "running":
+            completed += 1
+        if on_progress:
+            on_progress({**query.payload(), "status": status, "message": message,
+                         "completed": completed, "total": len(plan),
+                         "offer": asdict(offer) if offer else None})
+
+    departures = {}
+    for query in plan:
+        departures.setdefault(query.departure_date, []).append(query)
+    for dep_date, departure_queries in departures.items():
+        return_dates = [q.return_date for q in departure_queries]
 
         best_for_departure: Optional[tuple[OfferSummary, date]] = None
         query_errors = []
+        failed_queries = []
+        stop_error = None
 
-        for ret_date in return_dates:
+        for attempted, query in enumerate(departure_queries, start=1):
+            ret_date = query.return_date
+            progress(query, "running")
             try:
                 offers = client.search_offers(
                     origin=config.origin,
@@ -659,10 +792,20 @@ def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dic
                     adults=config.adults,
                     max_results=config.max_results_per_query,
                 )
-            except RateLimitError:
-                raise
-            except ApiError as err:
+            except ProviderUnavailableError as err:
+                progress(query, "error", str(err))
+                if best_for_departure is None:
+                    raise
+                # Emit an explicitly partial row before terminating, preserving fares
+                # from earlier return-date queries for this same departure.
                 query_errors.append(str(err))
+                failed_queries.append({**query.payload(), "message": str(err)})
+                stop_error = err
+                break
+            except ApiError as err:
+                progress(query, "error", str(err))
+                query_errors.append(str(err))
+                failed_queries.append({**query.payload(), "message": str(err)})
                 print(
                     f"Warning: query failed for departure {dep_date} "
                     f"return {ret_date}: {err}",
@@ -675,6 +818,7 @@ def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dic
                 min_connections_per_slice=config.min_connections_per_slice,
                 max_connections_per_slice=config.max_connections_per_slice,
             )
+            progress(query, "ok" if summary else "no_offers", offer=summary)
             if not summary:
                 continue
 
@@ -685,6 +829,7 @@ def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dic
             "origin": config.origin,
             "destination": config.destination,
             "departure_date": dep_date.isoformat(),
+            "failed_queries": json.dumps(failed_queries),
         }
         if query_errors:
             row["search_status"] = "partial" if best_for_departure else "error"
@@ -693,9 +838,14 @@ def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dic
                 + ("Best available price may be incomplete. " if best_for_departure else "Price unavailable. ")
                 + query_errors[0]
             )
+            if stop_error:
+                row["search_message"] += (
+                    f" Search stopped after {attempted} of {len(return_dates)} combinations; "
+                    f"{len(return_dates) - attempted} were not searched."
+                )
         else:
             row["search_status"] = "ok" if best_for_departure else "no_offers"
-            row["search_message"] = "Flights found" if best_for_departure else "No flights match these dates and layover filters."
+            row["search_message"] = "Flights found" if best_for_departure else "Duffel returned no priced results matching these filters; availability is not confirmed."
         if best_for_departure:
             summary = best_for_departure[0]
             row["best_price"] = f"{summary.price:.2f}"
@@ -709,6 +859,9 @@ def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dic
             row["mode"] = summary.mode
             row["best_offer_id"] = summary.offer_id
             row["airline_url"] = summary.airline_url
+            row["provider"] = summary.provider
+            row["searched_at"] = summary.searched_at
+            row["details_note"] = summary.details_note
             if not config.one_way:
                 row["best_return_date"] = best_for_departure[1].isoformat()
         else:
@@ -723,13 +876,18 @@ def iter_search_rows(client: DuffelClient, config: SearchConfig) -> Iterable[Dic
             row["mode"] = "N/A"
             row["best_offer_id"] = "N/A"
             row["airline_url"] = ""
+            row["provider"] = "duffel"
+            row["searched_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            row["details_note"] = ""
             if not config.one_way:
                 row["best_return_date"] = "N/A"
 
         yield row
+        if stop_error:
+            raise stop_error
 
 
-def run_search(client: DuffelClient, config: SearchConfig) -> List[Dict[str, str]]:
+def run_search(client: OfferClient, config: SearchConfig) -> List[Dict[str, str]]:
     rows = list(iter_search_rows(client, config))
     return rows
 
@@ -780,6 +938,12 @@ def write_csv(rows: List[Dict[str, str]], csv_path: str, one_way: bool) -> None:
             "mode",
             "best_offer_id",
             "airline_url",
+            "search_status",
+            "search_message",
+            "provider",
+            "searched_at",
+            "details_note",
+            "failed_queries",
         ]
     )
 
@@ -791,7 +955,7 @@ def write_csv(rows: List[Dict[str, str]], csv_path: str, one_way: bool) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Search for best flights over flexible dates.")
-    parser.add_argument("--origin", required=True, help="IATA origin code (e.g., MIL or MXP)")
+    parser.add_argument("--origin", required=True, help="IATA airport origin code (e.g., FCO or MXP)")
     parser.add_argument("--destination", required=True, help="IATA destination code (e.g., LIM)")
     parser.add_argument("--target-date", required=True, help="Target departure date in YYYY-MM-DD format")
     parser.add_argument("--date-flex-days", type=int, default=30, help="Days before/after target date")
@@ -799,31 +963,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-duration", type=int, default=5, help="Minimum trip duration in days")
     parser.add_argument("--max-duration", type=int, default=21, help="Maximum trip duration in days")
     parser.add_argument("--adults", type=int, default=1, help="Number of adult travelers")
-    parser.add_argument("--max-results-per-query", type=int, default=20, help="Max offers per API query")
+    parser.add_argument("--max-results-per-query", type=int, default=20, help="Max matching priced results per Duffel query")
     parser.add_argument("--min-connections-per-slice", type=int, default=0, help="Minimum layovers per slice")
-    parser.add_argument("--max-connections-per-slice", type=int, default=2, help="Maximum layovers per slice")
+    parser.add_argument("--max-connections-per-slice", type=int, default=2, help="Maximum layovers each way")
     parser.add_argument("--output-csv", help="Optional path to write CSV summary")
-    parser.add_argument(
-        "--duffel-access-token",
-        default=os.getenv("DUFFEL_ACCESS_TOKEN"),
-        help="Duffel API access token (or set DUFFEL_ACCESS_TOKEN)",
-    )
-
+    parser.add_argument("--duffel-access-token", default=os.getenv("DUFFEL_ACCESS_TOKEN"),
+                        help="Duffel access token (or set DUFFEL_ACCESS_TOKEN)")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-
-    if not args.duffel_access_token:
+    token = (args.duffel_access_token or "").strip().strip('"').strip("'")
+    if not token:
         print("Missing API credentials. Set DUFFEL_ACCESS_TOKEN or pass --duffel-access-token.", file=sys.stderr)
         return 2
-
-    if args.duffel_access_token.startswith("duffel_test_"):
-        print(
-            "Warning: using a Duffel test token. Test mode can return unrealistic schedules, prices, and flight numbers.",
-            file=sys.stderr,
-        )
+    if token.startswith("duffel_test_"):
+        print("Warning: Duffel test mode returns synthetic schedules and prices.", file=sys.stderr)
 
     try:
         config = build_search_config(
@@ -844,27 +1000,38 @@ def main() -> int:
         print(f"Invalid arguments: {err}", file=sys.stderr)
         return 2
 
-    client = DuffelClient(args.duffel_access_token)
+    client = DuffelClient(token,
+        min_connections=config.min_connections_per_slice,
+        max_connections=config.max_connections_per_slice,
+    )
 
+    rows = []
+    search_error = None
     try:
-        rows = run_search(client, config)
-    except RateLimitError as err:
-        print(f"API rate limit reached and retries exhausted. Details: {err}", file=sys.stderr)
-        return 3
+        for row in iter_search_rows(client, config):
+            rows.append(row)
     except ApiError as err:
-        print(f"API error: {err}", file=sys.stderr)
-        return 4
-    except requests.RequestException as err:
-        print(f"Network error while contacting API: {err}", file=sys.stderr)
-        return 5
+        print(f"Search error: {err}", file=sys.stderr)
+        if not rows:
+            return 4
+        search_error = err
+        print("Retaining available results; the full search is incomplete.", file=sys.stderr)
 
+    print("Duffel · account currency · airport-local times · fares can change.")
+    outcome = "stopped incomplete" if search_error else "completed"
+    print(f"Search {outcome}: {datetime.now(timezone.utc).isoformat(timespec='seconds')} (UTC)")
+    if not config.one_way:
+        print("Round-trip details cover outbound and return slices. Airline links are general websites; confirm fares before booking.")
     print_summary(rows, one_way=config.one_way)
+    for row in rows:
+        if row["search_status"] != "ok":
+            print(f"{row['departure_date']}: {row['search_message']}")
 
     if config.output_csv:
         write_csv(rows, config.output_csv, one_way=config.one_way)
         print(f"\nCSV summary written to: {config.output_csv}")
 
-    return 0
+    return 4 if search_error else 0
 
 
 if __name__ == "__main__":

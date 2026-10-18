@@ -74,6 +74,52 @@ assert.equal(stopped.counts().failed, 1);
 assert.equal([...stopped.ledger.values()].filter(q => q.status === 'pending').length, 53);
 assert.equal(stopped.active, false);
 
+// A fatal stop must not strand pending pairs or repeat successful/error pairs during continuation.
+const recovery = new SearchState({ ...config, password: 'private-password', date_flex_days: 0,
+  min_duration: 2, max_duration: 4 });
+const recoveryPlan = queryPlan(recovery.config);
+recovery.begin(recoveryPlan);
+recovery.recordStart({ request_id: 'request-initial', region: 'iad1', revision: 'abc123', cookie: 'private-cookie' });
+recovery.progress({ ...recoveryPlan[0], status: 'ok', offer: { price: 100, currency: 'EUR' },
+  diagnostics: { category: 'success', http_status: 200, elapsed_ms: 100, cookie: 'private-cookie' } });
+recovery.mergeRow({ departure_date: recoveryPlan[0].departure_date, best_price: '100.00', currency: 'EUR' });
+recovery.progress({ ...recoveryPlan[1], status: 'running' });
+recovery.finish(true);
+assert.equal(recovery.counts().completed, 2);
+assert.equal(recovery.counts().pending, 1);
+assert.equal(recovery.counts().failed, 1);
+assert.deepEqual(recovery.pendingQueries().map(q => q.query_id), [recoveryPlan[2].query_id]);
+assert.throws(() => recovery.begin([recoveryPlan[0]], 'resume'), /Only pending/);
+assert.throws(() => recovery.begin([recoveryPlan[1]], 'resume'), /Only pending/);
+recovery.begin(recovery.pendingQueries(), 'resume');
+recovery.recordStart({ request_id: 'request-continue', region: 'iad1' });
+assert.equal(recovery.retryCount, 0);
+assert.equal(recovery.resumeCount, 1);
+assert.equal(recovery.resuming, true);
+recovery.progress({ ...recoveryPlan[2], status: 'ok', offer: { price: 90, currency: 'EUR' },
+  diagnostics: { category: 'success', http_status: 200 } });
+recovery.mergeRow({ departure_date: recoveryPlan[2].departure_date, best_price: '90.00', currency: 'EUR' });
+recovery.finish();
+assert.equal(recovery.counts().completed, 3);
+assert.equal(recovery.counts().pending, 0);
+assert.equal(recovery.counts().failed, 1);
+assert.equal(recovery.displayRows()[0].search_status, 'partial');
+recovery.begin(recovery.failedQueries(), true);
+recovery.recordStart({ request_id: 'request-retry', region: 'iad1' });
+recovery.progress({ ...recoveryPlan[1], status: 'no_offers', diagnostics: { category: 'no_matching_priced_results' } });
+recovery.finish();
+assert.equal(recovery.displayRows()[0].search_status, 'ok');
+assert.equal(recovery.displayRows()[0].best_price, '90.00');
+assert.equal(recovery.active, false);
+const report = recovery.diagnosticReport();
+assert.equal(report.requests.length, 3);
+assert.equal(report.requests[1].kind, 'continue');
+assert.equal(report.queries[1].attempts[0].diagnostics.category, 'stream_interrupted');
+assert.equal(report.queries[1].attempts[1].request_id, 'request-retry');
+assert.equal(report.queries[0].attempts[0].diagnostics.http_status, 200);
+assert.ok(!JSON.stringify(report).includes('private-password'));
+assert.ok(!JSON.stringify(report).includes('private-cookie'));
+
 // Repeated manual retries remain available while errors remain, with one active pass.
 const repeated = new SearchState({ ...config, one_way: true, date_flex_days: 0 });
 const only = queryPlan(repeated.config)[0];

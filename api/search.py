@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
+import uuid
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Dict
@@ -16,6 +19,18 @@ from google_flights import GoogleFlightsClient
 
 
 SEARCH_PASSWORD = "victor"
+
+
+def deployment_metadata():
+    """Expose only deployment identifiers, never arbitrary environment values."""
+    def safe(value, limit):
+        return value[:limit] if value and re.fullmatch(r"[A-Za-z0-9_-]+", value) else None
+    return {"region": safe(os.environ.get("VERCEL_REGION"), 32) or "local",
+            "revision": safe(os.environ.get("VERCEL_GIT_COMMIT_SHA"), 40)}
+
+
+def diagnostic_log(event, request_id, **details):
+    print(json.dumps({"event": event, "request_id": request_id, **details}), file=sys.stderr, flush=True)
 
 
 def json_response(handler: BaseHTTPRequestHandler, status_code: int, payload: Dict[str, Any]) -> None:
@@ -91,21 +106,28 @@ class handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
 
+        request_id = str(uuid.uuid4())
+        metadata = {"request_id": request_id, **deployment_metadata()}
         rows = []
         ledger = {q.payload()["query_id"]: {**q.payload(), "status": "pending", "message": ""}
                   for q in plan}
 
         def report_progress(event):
             ledger[event["query_id"]].update(event)
+            if event["status"] != "running":
+                diagnostic_log("flight_query", request_id, query_id=event["query_id"],
+                               status=event["status"], diagnostics=event.get("diagnostics", {}))
             stream_event(self, {"type": "progress", **event})
 
         def terminal_details():
-            return {"failed_queries": [q for q in ledger.values() if q["status"] == "error"],
+            return {**metadata, "failed_queries": [q for q in ledger.values() if q["status"] == "error"],
                     "pending_queries": [q for q in ledger.values() if q["status"] == "pending"],
                     "completed": sum(q["status"] not in {"pending", "running"} for q in ledger.values()),
                     "total": len(plan)}
 
         try:
+            diagnostic_log("flight_search_start", request_id, **deployment_metadata(),
+                           total=len(plan), is_retry="retry_queries" in data)
             stream_event(
                 self,
                 {
@@ -116,6 +138,7 @@ class handler(BaseHTTPRequestHandler):
                     "queries": [q.payload() for q in plan],
                     "total": len(plan),
                     "is_retry": "retry_queries" in data,
+                    **metadata,
                 },
             )
             client = GoogleFlightsClient(
@@ -127,11 +150,22 @@ class handler(BaseHTTPRequestHandler):
                 rows.append(row)
                 stream_event(self, {"type": "row", "row": row, "searched": len(rows)})
         except ApiError as err:
+            terminal = terminal_details()
+            diagnostic_log("flight_search_error", request_id, completed=terminal["completed"],
+                           total=len(plan), diagnostics=err.diagnostics)
             stream_event(self, {"type": "error", "error": str(err), "status": 502,
-                                "searched": len(rows), "incomplete": True, **terminal_details()})
+                                "searched": len(rows), "incomplete": True,
+                                "diagnostics": err.diagnostics, **terminal})
+            return
+        except (BrokenPipeError, ConnectionResetError):
+            diagnostic_log("flight_search_disconnected", request_id,
+                           completed=terminal_details()["completed"], total=len(plan))
             return
 
-        stream_event(self, {"type": "done", "rows": rows, "searched": len(rows), **terminal_details()})
+        terminal = terminal_details()
+        diagnostic_log("flight_search_done", request_id, completed=terminal["completed"], total=len(plan),
+                       failed=len(terminal["failed_queries"]))
+        stream_event(self, {"type": "done", "rows": rows, "searched": len(rows), **terminal})
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)

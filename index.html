@@ -322,6 +322,9 @@
       }
 
       .date { white-space: nowrap; }
+      #searchDiagnostics { margin-top: 12px; overflow-wrap: anywhere; font-size: 13px; }
+      #searchDiagnostics summary { cursor: pointer; font-weight: 650; }
+      #diagnosticErrors li { margin: 8px 0; }
 
       .route {
         min-width: 210px;
@@ -615,6 +618,7 @@
         <div class="search-tools-head">
           <div><span class="search-activity" id="searchActivity" hidden><span class="spinner" aria-hidden="true"></span><span id="loadingLabel">Loading…</span></span> <span id="progressCount" role="status" aria-live="polite"></span></div>
           <div class="search-tool-buttons">
+            <button id="continueButton" type="button" hidden>Continue pending dates</button>
             <button id="retryButton" type="button" hidden>Retry failed dates</button>
             <button id="copyButton" type="button" disabled>Copy table</button>
           </div>
@@ -628,6 +632,14 @@
           <span><i class="progress-slot" data-status="error"></i>Failed</span>
         </div>
         <p class="search-summary" id="retryHint" hidden></p>
+        <details id="searchDiagnostics">
+          <summary>Search diagnostics <span id="diagnosticsCount"></span></summary>
+          <p>Google query failures leave availability unknown. These details distinguish a returned Google error from HTTP blocking, parsing failures, and interrupted streams.</p>
+          <p id="requestDetails" class="search-summary"></p>
+          <div id="diagnosticErrors"></div>
+          <p id="citySearchHint" hidden></p>
+          <button id="copyDiagnosticsButton" type="button">Copy diagnostics</button>
+        </details>
         <p class="copy-feedback" id="copyFeedback" role="status" aria-live="polite"></p>
         <textarea id="copyFallback" class="copy-fallback" aria-label="Table text to copy manually" readonly hidden></textarea>
       </section>
@@ -693,6 +705,7 @@
       const loadingLabel = document.querySelector("#loadingLabel");
       const progressCount = document.querySelector("#progressCount");
       const progressSlots = document.querySelector("#progressSlots");
+      const continueButton = document.querySelector("#continueButton");
       const retryButton = document.querySelector("#retryButton");
       const copyButton = document.querySelector("#copyButton");
       const copyFeedback = document.querySelector("#copyFeedback");
@@ -1101,10 +1114,12 @@
         const counts = currentSearch.counts();
         searchTools.hidden = false;
         searchActivity.hidden = !currentSearch.active;
-        loadingLabel.textContent = currentSearch.retrying ? `Retry ${currentSearch.retryCount}…` : "Loading…";
-        progressCount.textContent = currentSearch.retrying
+        loadingLabel.textContent = currentSearch.resuming ? "Continuing pending dates…" : currentSearch.retrying ? `Retry ${currentSearch.retryCount}…` : "Loading…";
+        progressCount.textContent = currentSearch.resuming
+          ? `Continue pass ${currentSearch.resumeCount}: ${counts.passCompleted}/${counts.passTotal} checked · Overall: ${counts.completed}/${counts.total} checked · ${counts.failed} failed · ${counts.pending} pending`
+          : currentSearch.retrying
           ? `Retry pass ${currentSearch.retryCount}: ${counts.passCompleted}/${counts.passTotal} checked · Overall: ${counts.completed}/${counts.total} checked · ${counts.failed} failed`
-          : `${counts.completed}/${counts.total} checked · ${counts.failed} failed`;
+          : `${counts.completed}/${counts.total} checked · ${counts.failed} failed · ${counts.pending} pending`;
         progressSlots.setAttribute("aria-valuemax", String(counts.total || 1));
         progressSlots.setAttribute("aria-valuenow", String(counts.completed));
         progressSlots.setAttribute("aria-valuetext", progressCount.textContent);
@@ -1120,12 +1135,44 @@
         }
         progressSlots.replaceChildren(fragment);
         copyButton.disabled = currentSearch.rows.size === 0;
+        continueButton.hidden = currentSearch.active || counts.pending === 0;
+        continueButton.textContent = `Continue pending dates (${counts.pending})`;
         retryButton.hidden = currentSearch.active || counts.failed === 0;
         retryButton.textContent = `Retry failed dates (${counts.failed})`;
         const retryHint = document.querySelector("#retryHint");
-        retryHint.hidden = currentSearch.active || counts.failed === 0;
-        retryHint.textContent = `You can retry remaining failures again. Waiting a little between attempts may help.${currentSearch.lastFinishedAt ? ` Last pass finished at ${new Date(currentSearch.lastFinishedAt).toLocaleTimeString()}.` : ""}`;
+        retryHint.hidden = currentSearch.active || (counts.failed === 0 && counts.pending === 0);
+        retryHint.textContent = `${counts.pending ? "Continue pending dates searches only the combinations not yet checked. " : ""}${counts.failed ? "Retry failed dates checks only errors. Waiting between attempts may help, but repeated errors can persist. " : ""}${currentSearch.lastFinishedAt ? ` Last pass finished at ${new Date(currentSearch.lastFinishedAt).toLocaleTimeString()}.` : ""}`;
         button.disabled = currentSearch.active;
+      }
+
+      function diagnosticLabel(details = {}) {
+        const labels = { upstream_error: "Google returned a generic query error; this does not confirm missing flights or prove blocking.",
+          http_rate_limited: "Google returned HTTP 429 (too many requests).", http_error: "Google returned an HTTP error.",
+          missing_results_script: "The expected Google results data was missing.", consent_error: "Google cookie consent could not be completed.",
+          network_error: "The connection to Google failed.", parser_error: "The Google response could not be parsed.",
+          stream_interrupted: "The search stream ended before this query completed.", provider_error: "The provider request failed." };
+        return [labels[details.category] || details.category || "No additional provider details available.",
+          details.http_status ? `HTTP ${details.http_status}` : "", details.elapsed_ms != null ? `${details.elapsed_ms} ms` : "",
+          details.response_kind ? `Response: ${details.response_kind}` : "", details.exception_type || ""].filter(Boolean).join(" · ");
+      }
+
+      function renderDiagnostics() {
+        const failures = currentSearch.failedQueries();
+        document.querySelector("#diagnosticsCount").textContent = `(${failures.length} unresolved failures)`;
+        const cities = [currentSearch.config.origin, currentSearch.config.destination]
+          .map(code => airportCatalog.resolve(code)).filter(place => place?.type === "city");
+        const cityHint = document.querySelector("#citySearchHint");
+        cityHint.hidden = !failures.length || !cities.length;
+        cityHint.textContent = cities.length ? `For a narrower search, you can select an individual airport: ${cities.map(place => `${place.code} includes ${place.airport_codes.join(", ")}`).join("; ")}. This changes the airports covered by the search.` : "";
+        const request = currentSearch.currentRequest;
+        document.querySelector("#requestDetails").textContent = request?.request_id
+          ? `Request ${request.request_id} · Server ${request.region || "unknown"}${request.revision ? ` · Revision ${request.revision}` : ""}`
+          : "Request details will appear when the server starts responding.";
+        document.querySelector("#diagnosticErrors").innerHTML = failures.length
+          ? '<ul>' + failures.map(query => {
+            const attempt = query.attempts?.at(-1);
+            return `<li><strong>${escapeHtml(query.departure_date)} → ${escapeHtml(query.return_date || "one-way")}</strong>: ${escapeHtml(diagnosticLabel(attempt?.diagnostics || query.diagnostics))}${attempt?.request_id ? `<br>Request ${escapeHtml(attempt.request_id)}` : ""}</li>`;
+          }).join("") + '</ul>' : '<p>No unresolved failures. Copy diagnostics includes all checked date pairs.</p>';
       }
 
       function renderCalendar() {
@@ -1163,6 +1210,8 @@
         const heading = `${selected.departure_date} → ${selected.return_date || "one-way"}`;
         const labels = { pending: "Not searched yet.", running: "Searching this date pair…", no_offers: "No matching priced results were returned; availability is not confirmed.", error: "The latest query failed; availability is unknown.", ok: "Priced results found." };
         detail.innerHTML = `<h3>${escapeHtml(heading)}</h3><p>${escapeHtml(labels[selected.status] || "")}${selected.message ? ` ${escapeHtml(selected.message)}` : ""}</p>`;
+        if (selected.status === "error") detail.innerHTML += `<p>${escapeHtml(diagnosticLabel(selected.attempts?.at(-1)?.diagnostics || selected.diagnostics))}</p>`;
+        if (!quote && selected.search_url) detail.innerHTML += `<button type="button" class="airline-link" data-airline-url="${escapeHtml(selected.search_url)}">Check these dates on Google Flights</button>`;
         if (quote) detail.innerHTML += `<p><strong>${escapeHtml(money(quote.price))}</strong> lowest observed fare · ${escapeHtml(quote.airlines)}\n${escapeHtml(quote.airports)} · Layovers: ${escapeHtml(quote.layovers)} · Outbound duration: ${escapeHtml(quote.total_duration)}</p><p>${escapeHtml(quote.flight_segments.replaceAll("; ", "\n"))}</p><p>Observed ${escapeHtml(quote.searched_at)}. ${escapeHtml(quote.details_note)}</p><button type="button" class="airline-link" data-airline-url="${escapeHtml(quote.airline_url)}">Google Flights</button>`;
       }
 
@@ -1175,13 +1224,17 @@
 
       function renderSearch() {
         renderProgress();
+        renderDiagnostics();
         renderCalendar();
         renderTable(currentSearch.displayRows(), currentSearch.config.one_way, currentSearch.active);
       }
 
       async function readStreamingResponse(response) {
         await FlightUI.readStream(response, event => {
-          if (event.type === "start") status.textContent = "Google Flights · EUR";
+          if (event.type === "start") {
+            currentSearch.recordStart(event);
+            status.textContent = "Google Flights · EUR";
+          }
           if (event.type === "progress") currentSearch.progress(event);
           if (event.type === "row") currentSearch.mergeRow(event.row);
           if (event.type === "done") currentSearch.finish();
@@ -1191,7 +1244,8 @@
 
       async function runSearch(retry = false) {
         if (!currentSearch || currentSearch.active) return;
-        const queries = retry ? currentSearch.failedQueries() : FlightUI.queryPlan(currentSearch.config);
+        const queries = retry === "resume" ? currentSearch.pendingQueries()
+          : retry ? currentSearch.failedQueries() : FlightUI.queryPlan(currentSearch.config);
         if (!queries.length) {
           message.className = "message error";
           message.textContent = "Choose a valid departure window and trip-duration range.";
@@ -1201,7 +1255,7 @@
         copyFeedback.textContent = "";
         copyFallback.hidden = true;
         message.className = "message";
-        message.textContent = retry ? "Retrying failed date combinations using the original search settings…" : "Searching…";
+        message.textContent = retry === "resume" ? "Continuing unattempted date combinations using the original search settings…" : retry ? "Retrying failed date combinations using the original search settings…" : "Searching…";
         renderSearch();
         const payload = { ...currentSearch.config };
         if (retry) payload.retry_queries = queries.map(({ departure_date, return_date }) => ({ departure_date, return_date }));
@@ -1244,6 +1298,22 @@
         document.querySelector("#searchSummary").textContent = `${config.origin} → ${config.destination} · ${config.one_way ? "One way" : "Round trip"} · ${config.target_date} ± ${config.date_flex_days} days · ${config.exclude_self_transfers ? "Self-transfers and separate tickets excluded" : "Self-transfers and separate tickets included"}`;
         status.textContent = "";
         await runSearch();
+      });
+      continueButton.addEventListener("click", () => runSearch("resume"));
+      document.querySelector("#copyDiagnosticsButton").addEventListener("click", async () => {
+        if (!currentSearch) return;
+        const text = JSON.stringify(currentSearch.diagnosticReport(), null, 2);
+        try {
+          await FlightUI.writeClipboard({ text, html: `<pre>${escapeHtml(text)}</pre>` });
+          copyFeedback.textContent = "Diagnostics copied. Passwords and cookies are excluded.";
+          copyFallback.hidden = true;
+        } catch (_) {
+          copyFeedback.textContent = "Select and copy the diagnostics below.";
+          copyFallback.value = text;
+          copyFallback.hidden = false;
+          copyFallback.focus();
+          copyFallback.select();
+        }
       });
       retryButton.addEventListener("click", () => runSearch(true));
       copyButton.addEventListener("click", async () => {

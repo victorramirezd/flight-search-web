@@ -6,6 +6,7 @@ Prices for those searches are indicative round-trip fares, not booked offers.
 from __future__ import annotations
 
 import math
+import re
 import time
 from datetime import date, datetime, timezone
 from typing import Optional
@@ -22,6 +23,16 @@ REQUEST_INTERVAL_SECONDS = 1.5
 MAX_CONSECUTIVE_QUERY_ERRORS = 3
 
 
+class FetchError(RuntimeError):
+    """A safe explanation with no upstream response body or session data."""
+
+
+def empty_diagnostics():
+    return {"category": "unknown", "http_status": None, "response_kind": "unknown",
+            "consent_handled": False, "elapsed_ms": 0, "exception_type": None,
+            "upstream_error": False}
+
+
 class ConsentAwareFetcher(FetchIntegration):
     """Adapted from the flight-search skill's bundled search_flights.py helper."""
 
@@ -30,30 +41,57 @@ class ConsentAwareFetcher(FetchIntegration):
             impersonate="chrome_145", impersonate_os="macos", timeout=30,
             cookie_store=True,
         )
+        self.diagnostics = empty_diagnostics()
 
     def fetch_html(self, query):
+        self.diagnostics = empty_diagnostics()
         params = query.params() if not isinstance(query, str) else {"q": query}
         url = "https://www.google.com/travel/flights"
-        response = self.client.get(url, params=params)
+        try:
+            response = self.client.get(url, params=params)
+        except Exception as exc:
+            self.diagnostics.update(category="network_error", response_kind="network_error")
+            raise FetchError("Google could not be reached") from exc
         self.check_status(response)
         parser = LexborHTMLParser(response.text)
-        for form in parser.css('form[action="https://consent.google.com/save"]'):
+        consent_forms = parser.css('form[action="https://consent.google.com/save"]')
+        for form in consent_forms:
             data = {node.attributes["name"]: node.attributes.get("value", "")
                     for node in form.css("input[name]")}
             if data.get("set_eom") == "true":
-                consent = self.client.post("https://consent.google.com/save", data=data)
+                self.diagnostics.update(consent_handled=True, response_kind="consent")
+                try:
+                    consent = self.client.post("https://consent.google.com/save", data=data)
+                except Exception as exc:
+                    self.diagnostics.update(category="consent_error")
+                    raise FetchError("Google consent request could not complete") from exc
                 self.check_status(consent)
-                response = self.client.get(url, params=params)
+                try:
+                    response = self.client.get(url, params=params)
+                except Exception as exc:
+                    self.diagnostics.update(category="network_error", response_kind="network_error")
+                    raise FetchError("Google could not be reached after consent handling") from exc
                 self.check_status(response)
                 break
-        if not LexborHTMLParser(response.text).css_first(r"script.ds\:1"):
-            raise RuntimeError("Google returned no flight-results script after consent handling")
+        final_parser = LexborHTMLParser(response.text)
+        script = final_parser.css_first(r"script.ds\:1")
+        if not script:
+            has_consent = bool(final_parser.css('form[action="https://consent.google.com/save"]'))
+            self.diagnostics.update(category="consent_error" if has_consent else "missing_results_script",
+                                    response_kind="consent" if has_consent else "missing_results_script")
+            raise FetchError("Google returned no flight-results script after consent handling")
+        upstream_error = bool(re.search(r"errorHasStatus\s*:\s*true", script.text()))
+        self.diagnostics.update(category="upstream_error" if upstream_error else "success",
+                                response_kind="upstream_error" if upstream_error else "flights_results",
+                                upstream_error=upstream_error)
         return response.text
 
-    @staticmethod
-    def check_status(response):
+    def check_status(self, response):
+        self.diagnostics["http_status"] = response.status_code
         if response.status_code != 200:
-            raise RuntimeError(f"Google returned HTTP {response.status_code}")
+            self.diagnostics.update(category="http_rate_limited" if response.status_code == 429 else "http_error",
+                                    response_kind="http_error")
+            raise FetchError(f"Google returned HTTP {response.status_code}")
 
 
 def local_datetime(value) -> datetime:
@@ -83,6 +121,8 @@ class GoogleFlightsClient:
         self.exclude_self_transfers = exclude_self_transfers
         self.last_request_at = None
         self.consecutive_query_errors = 0
+        self.last_query_diagnostics = empty_diagnostics()
+        self.last_search_url = ""
 
     def search_offers(
         self, *, origin: str, destination: str, departure_date: date,
@@ -99,31 +139,70 @@ class GoogleFlightsClient:
             max_stops=self.max_connections,
             hide_separate_and_self_transfer=self.exclude_self_transfers,
         )
+        self.last_search_url = query.url()
+        self.integration.diagnostics = empty_diagnostics()
         # Pace date combinations; changing dates should not create a burst of requests.
         if self.last_request_at is not None:
             remaining = REQUEST_INTERVAL_SECONDS - (time.monotonic() - self.last_request_at)
             if remaining > 0:
                 time.sleep(remaining)
         self.last_request_at = time.monotonic()
+        started = time.perf_counter()
+
+        def diagnostics(category, exception=None):
+            details = dict(self.integration.diagnostics)
+            details.update(category=category, elapsed_ms=round((time.perf_counter() - started) * 1000),
+                           exception_type=type(exception).__name__ if exception else None)
+            self.last_query_diagnostics = details
+            return details
+
         context = f"departure {departure_date}, return {return_date or 'one-way'}"
         try:
             results = get_flights(query, integration=self.integration)
         except FlightsNotFound as exc:
             # This is Google's generic error payload, not evidence of no availability.
             self.consecutive_query_errors += 1
+            details = diagnostics("upstream_error", exc)
+            details.update(upstream_error=True, response_kind="upstream_error")
             message = f"Google could not return results for {context}; availability is unknown."
             if self.consecutive_query_errors >= MAX_CONSECUTIVE_QUERY_ERRORS:
                 raise ProviderUnavailableError(
-                    message + f" Search stopped after {self.consecutive_query_errors} consecutive query errors."
+                    message + f" Search stopped after {self.consecutive_query_errors} consecutive query errors.",
+                    diagnostics=details, search_url=self.last_search_url,
                 ) from exc
-            raise ApiError(message) from exc
+            raise ApiError(message, diagnostics=details, search_url=self.last_search_url) from exc
         except Exception as exc:
             # Do not repeat a blocked/broken scraper for every date in a flexible window.
+            category = self.integration.diagnostics["category"]
+            if category in {"unknown", "success", "upstream_error"}:
+                category = "parser_error"
+            details = diagnostics(category, exc)
+            explanation = str(exc) if isinstance(exc, FetchError) else "Google response could not be parsed"
+            # Preserve the safe status explanation used by older integrations.
+            if re.fullmatch(r"Google returned HTTP \d{3}", str(exc)):
+                status = int(str(exc).rsplit(" ", 1)[1])
+                details.update(http_status=status, response_kind="http_error",
+                               category="http_rate_limited" if status == 429 else "http_error")
+                explanation = str(exc)
             raise ProviderUnavailableError(
-                f"Google Flights search failed for {context}: {exc}. Search stopped; availability is unknown."
+                f"Google Flights search failed for {context}: {explanation}. Search stopped; availability is unknown.",
+                diagnostics=details, search_url=self.last_search_url,
             ) from exc
         self.consecutive_query_errors = 0
 
+        try:
+            offers = self._normalize_offers(results, query, origin, destination, departure_date, return_date)
+        except Exception as exc:
+            raise ProviderUnavailableError(
+                f"Google Flights search failed for {context}: Google itinerary data could not be parsed. "
+                "Search stopped; availability is unknown.",
+                diagnostics=diagnostics("parser_error", exc), search_url=self.last_search_url,
+            ) from exc
+        diagnostics("success" if offers else "no_matching_priced_results")
+        # Apply stop filters before truncation, so cheap excluded fares don't hide valid ones.
+        return sorted(offers, key=lambda offer: float(offer["total_amount"]))[:max_results]
+
+    def _normalize_offers(self, results, query, origin, destination, departure_date, return_date):
         searched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         offers = []
         for result in results:
@@ -160,5 +239,4 @@ class GoogleFlightsClient:
                 "_search_url": query.url(), "_provider": "google_flights", "_searched_at": searched_at,
                 "_details_note": note + "Times are local to each airport. Flight numbers are unavailable. Fares can change.",
             })
-        # Apply stop filters before truncation, so cheap excluded fares don't hide valid ones.
-        return sorted(offers, key=lambda offer: float(offer["total_amount"]))[:max_results]
+        return offers

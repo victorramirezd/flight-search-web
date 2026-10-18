@@ -1,4 +1,5 @@
 import json
+import io
 import subprocess
 import sys
 import threading
@@ -8,7 +9,7 @@ from datetime import date, timedelta
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from api.search import handler
 from flight_search import (ApiError, build_search_config, iter_search_rows, search_queries,
@@ -122,6 +123,39 @@ runpy.run_module('flight_search', run_name='__main__', alter_sys=True)
 
 
 class RetryEndpointTest(unittest.TestCase):
+    def test_stream_diagnostics_correlate_with_safe_logs_and_preserve_pending_queries(self):
+        from types import SimpleNamespace
+        payload = dict(password="Victor", origin="MIL", destination="PMO", target_date=DEPARTURE.isoformat(),
+                       date_flex_days=0, min_duration=2, max_duration=4)
+        network = Mock()
+        generic = '<script class="ds:1">data:errorHasStatus: true,</script>'
+        network.get.side_effect = [SimpleNamespace(status_code=200, text=generic),
+                                   SimpleNamespace(status_code=429, text="SECRET_UPSTREAM_BODY")]
+        with endpoint() as address, patch("google_flights.Client", return_value=network), \
+                patch("google_flights.time.sleep"), patch("api.search.sys.stderr", new_callable=io.StringIO) as logs, \
+                patch.dict("os.environ", {"VERCEL_REGION": "fra1", "VERCEL_GIT_COMMIT_SHA": "a" * 40}):
+            status, body = post(address, payload)
+            safe_logs = logs.getvalue()
+        self.assertEqual(status, 200)
+        events = [json.loads(line) for line in body.splitlines()]
+        start, terminal = events[0], events[-1]
+        self.assertEqual(terminal["type"], "error")
+        self.assertEqual(terminal["request_id"], start["request_id"])
+        self.assertEqual(start["region"], "fra1")
+        self.assertEqual(start["revision"], "a" * 40)
+        self.assertEqual(terminal["diagnostics"]["category"], "http_rate_limited")
+        self.assertEqual(terminal["diagnostics"]["http_status"], 429)
+        self.assertEqual(terminal["completed"], 2)
+        self.assertEqual(len(terminal["failed_queries"]), 2)
+        self.assertEqual(len(terminal["pending_queries"]), 1)
+        self.assertEqual([event["diagnostics"]["category"] for event in events
+                          if event["type"] == "progress" and event["status"] == "error"],
+                         ["upstream_error", "http_rate_limited"])
+        self.assertNotIn("SECRET_UPSTREAM_BODY", body.decode() + safe_logs)
+        self.assertNotIn('"password"', safe_logs)
+        self.assertIn(start["request_id"], safe_logs)
+        self.assertIn('"event": "flight_query"', safe_logs)
+
     def test_each_date_pair_streams_its_own_fare_for_the_calendar(self):
         payload = dict(password="Victor", origin="MIL", destination="LIM", target_date=DEPARTURE.isoformat(),
                        date_flex_days=0, min_duration=12, max_duration=13)

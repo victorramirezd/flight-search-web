@@ -2,6 +2,11 @@
 (function (root) {
   const finished = new Set(['ok', 'no_offers', 'error']);
   const effectiveStatus = q => finished.has(q.status) ? q.status : q.previous_status || q.status;
+  const diagnosticKeys = ['category', 'http_status', 'response_kind', 'consent_handled', 'elapsed_ms',
+    'exception_type', 'upstream_error', 'consecutive_errors', 'retry_after_seconds', 'result_count', 'google_error_payload'];
+  const safeDiagnostics = value => Object.fromEntries(diagnosticKeys
+    .filter(key => value && ['string', 'number', 'boolean'].includes(typeof value[key]))
+    .map(key => [key, value[key]]));
   const queryId = q => `${q.departure_date}|${q.return_date || 'one-way'}`;
   function addDays(iso, days) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || '') || !Number.isInteger(days)) return null;
@@ -62,24 +67,41 @@
       this.retryCount = 0;
       this.lastFinishedAt = null;
       this.retrying = false;
+      this.resuming = false;
+      this.resumeCount = 0;
+      this.requests = [];
+      this.currentRequest = null;
       this.passIds = new Set();
     }
     begin(queries, retry = false) {
       if (this.active) throw new Error('A search is already running.');
+      const resuming = retry === 'resume';
+      const retrying = retry === true;
       if (!queries.length || queries.some(q => !this.ledger.has(queryId(q))
-        || (retry && effectiveStatus(this.ledger.get(queryId(q))) !== 'error'))) {
-        throw new Error('Only failed date pairs can be retried.');
+        || (retrying && effectiveStatus(this.ledger.get(queryId(q))) !== 'error')
+        || (resuming && finished.has(effectiveStatus(this.ledger.get(queryId(q))))))) {
+        throw new Error(resuming ? 'Only pending date pairs can be continued.' : 'Only failed date pairs can be retried.');
       }
       this.active = true;
-      this.retrying = retry;
-      if (retry) this.retryCount += 1;
+      this.retrying = retrying;
+      this.resuming = resuming;
+      this.currentRequest = null;
+      if (retrying) this.retryCount += 1;
+      if (resuming) this.resumeCount += 1;
       this.passIds = new Set(queries.map(queryId));
       for (const id of this.passIds) {
         const existing = this.ledger.get(id);
         if (existing) this.ledger.set(id, { ...existing, status: 'pending', message: '',
-          previous_status: retry ? effectiveStatus(existing) : undefined,
-          previous_message: retry ? existing.message || existing.previous_message : undefined });
+          previous_status: retrying ? effectiveStatus(existing) : undefined,
+          previous_message: retrying ? existing.message || existing.previous_message : undefined });
       }
+    }
+    recordStart(event) {
+      const metadata = Object.fromEntries(['request_id', 'region', 'revision', 'started_at']
+        .filter(key => typeof event[key] === 'string').map(key => [key, event[key]]));
+      this.currentRequest = metadata;
+      this.requests.push({ ...metadata, kind: this.resuming ? 'continue' : this.retrying ? 'retry' : 'search',
+        total: this.passIds.size });
     }
     progress(event) {
       const id = queryId(event);
@@ -90,7 +112,12 @@
         && incoming.price !== null && incoming.price !== '' && Number.isFinite(Number(incoming.price)) && Number(incoming.price) >= 0;
       const quote = valid && (!previous.quote || Number(incoming.price) < Number(previous.quote.price))
         ? { ...incoming } : previous.quote;
-      this.ledger.set(id, { ...previous, ...event, query_id: id, quote });
+      const diagnostics = safeDiagnostics(event.diagnostics);
+      const attempts = previous.attempts || [];
+      if (finished.has(event.status)) attempts.push({ status: event.status, message: event.message || '',
+        request_id: this.currentRequest?.request_id || '', diagnostics });
+      this.ledger.set(id, { ...previous, ...event, query_id: id, quote, diagnostics,
+        attempts: attempts.slice(-10) });
     }
     mergeRow(row) {
       const previous = this.rows.get(row.departure_date);
@@ -102,7 +129,10 @@
       if (interrupted) {
         for (const [id, query] of this.ledger) {
           if (query.status === 'running') this.ledger.set(id, { ...query, status: 'error',
-            message: 'Search interrupted during this query; availability is unknown.' });
+            message: 'Search interrupted during this query; availability is unknown.',
+            diagnostics: { category: 'stream_interrupted' },
+            attempts: [...(query.attempts || []), { status: 'error', request_id: this.currentRequest?.request_id || '',
+              message: 'Stream interrupted before this query finished.', diagnostics: { category: 'stream_interrupted' } }].slice(-10) });
         }
       }
       if (this.active) this.lastFinishedAt = Date.now();
@@ -111,10 +141,26 @@
     failedQueries() {
       return [...this.ledger.values()].filter(q => effectiveStatus(q) === 'error');
     }
+    pendingQueries() {
+      return [...this.ledger.values()].filter(q => !finished.has(effectiveStatus(q)));
+    }
+    diagnosticReport() {
+      const fields = ['origin', 'destination', 'target_date', 'date_flex_days', 'one_way', 'min_duration',
+        'max_duration', 'adults', 'max_results_per_query', 'min_connections_per_slice',
+        'max_connections_per_slice', 'exclude_self_transfers'];
+      return { version: 1, exported_at: new Date().toISOString(),
+        search: Object.fromEntries(fields.filter(key => key in this.config).map(key => [key, this.config[key]])),
+        counts: this.counts(), requests: this.requests,
+        queries: [...this.ledger.values()].map(q => ({ query_id: q.query_id,
+          departure_date: q.departure_date, return_date: q.return_date, status: effectiveStatus(q),
+          message: q.message || q.previous_message || '', attempts: q.attempts || [],
+          observed_price: q.quote ? { price: q.quote.price, currency: q.quote.currency,
+            searched_at: q.quote.searched_at } : null })) };
+    }
     counts() {
       const queries = [...this.ledger.values()];
       return { total: queries.length, completed: queries.filter(q => finished.has(effectiveStatus(q))).length,
-        failed: this.failedQueries().length, passTotal: this.passIds.size,
+        failed: this.failedQueries().length, pending: this.pendingQueries().length, passTotal: this.passIds.size,
         passCompleted: queries.filter(q => this.passIds.has(q.query_id) && finished.has(q.status)).length };
     }
     displayRows() {

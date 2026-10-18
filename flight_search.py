@@ -53,6 +53,12 @@ class OfferSummary:
 class ApiError(Exception):
     """Raised when a flight query cannot return a trustworthy result."""
 
+    def __init__(self, message: str, *, diagnostics: Optional[dict] = None,
+                 search_url: str = ""):
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
+        self.search_url = search_url
+
 
 class ProviderUnavailableError(ApiError):
     """Stop the search when Google is blocked or its response cannot be parsed."""
@@ -559,14 +565,28 @@ def iter_search_rows(
     completed = 0
 
     def progress(query: SearchQuery, status: str, message: str = "",
-                 offer: Optional[OfferSummary] = None) -> None:
+                 offer: Optional[OfferSummary] = None, error: Optional[ApiError] = None) -> None:
         nonlocal completed
         if status != "running":
             completed += 1
         if on_progress:
+            details = {}
+            if status != "running":
+                diagnostics = (error.diagnostics if error else
+                               getattr(client, "last_query_diagnostics", {}))
+                diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+                search_url = (error.search_url if error else
+                              getattr(client, "last_search_url", ""))
+                defaults = {"category": "provider_error" if error else
+                            ("success" if status == "ok" else "no_matching_priced_results"),
+                            "http_status": None, "response_kind": "unknown", "consent_handled": False,
+                            "elapsed_ms": 0, "exception_type": type(error).__name__ if error else None,
+                            "upstream_error": False}
+                details = {"diagnostics": {**defaults, **diagnostics},
+                           "search_url": search_url if isinstance(search_url, str) else ""}
             on_progress({**query.payload(), "status": status, "message": message,
                          "completed": completed, "total": len(plan),
-                         "offer": asdict(offer) if offer else None})
+                         "offer": asdict(offer) if offer else None, **details})
 
     departures = {}
     for query in plan:
@@ -592,7 +612,7 @@ def iter_search_rows(
                     max_results=config.max_results_per_query,
                 )
             except ProviderUnavailableError as err:
-                progress(query, "error", str(err))
+                progress(query, "error", str(err), error=err)
                 if best_for_departure is None:
                     raise
                 # Emit an explicitly partial row before terminating, preserving fares
@@ -602,7 +622,7 @@ def iter_search_rows(
                 stop_error = err
                 break
             except ApiError as err:
-                progress(query, "error", str(err))
+                progress(query, "error", str(err), error=err)
                 query_errors.append(str(err))
                 failed_queries.append({**query.payload(), "message": str(err)})
                 print(

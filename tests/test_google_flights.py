@@ -260,3 +260,80 @@ class ConsentTest(unittest.TestCase):
                          SimpleNamespace(status_code=429, text="")]:
             with self.subTest(status=response.status_code), self.assertRaises(RuntimeError):
                 self.fetcher([response]).fetch_html("query")
+
+    def test_fetcher_classifies_http_missing_consent_and_network_failures(self):
+        cases = [(429, "", "http_rate_limited", "http_error"),
+                 (503, "", "http_error", "http_error"),
+                 (200, "<html>Unrecognized page</html>", "missing_results_script", "missing_results_script"),
+                 (200, '<form action="https://consent.google.com/save"></form>', "consent_error", "consent")]
+        for status, text, category, kind in cases:
+            with self.subTest(category=category):
+                fetcher = self.fetcher([SimpleNamespace(status_code=status, text=text)])
+                with self.assertRaises(RuntimeError):
+                    fetcher.fetch_html("query")
+                self.assertEqual(fetcher.diagnostics["category"], category)
+                self.assertEqual(fetcher.diagnostics["response_kind"], kind)
+                self.assertEqual(fetcher.diagnostics["http_status"], status)
+        fetcher = self.fetcher([OSError("private network details")])
+        with self.assertRaisesRegex(RuntimeError, "Google could not be reached"):
+            fetcher.fetch_html("query")
+        self.assertEqual(fetcher.diagnostics["category"], "network_error")
+        self.assertIsNone(fetcher.diagnostics["http_status"])
+
+    def test_consent_and_generic_payload_diagnostics_reset_between_queries(self):
+        consent = '<form action="https://consent.google.com/save"><input name="set_eom" value="true"></form>'
+        generic = '<script class="ds:1">data:errorHasStatus: true,</script>'
+        results = '<script class="ds:1">data:[],</script>'
+        fetcher = self.fetcher([SimpleNamespace(status_code=200, text=consent),
+                                SimpleNamespace(status_code=200, text=generic),
+                                SimpleNamespace(status_code=200, text=results)])
+        fetcher.fetch_html("query")
+        self.assertEqual(fetcher.diagnostics["category"], "upstream_error")
+        self.assertTrue(fetcher.diagnostics["upstream_error"])
+        self.assertTrue(fetcher.diagnostics["consent_handled"])
+        fetcher.fetch_html("query")
+        self.assertFalse(fetcher.diagnostics["upstream_error"])
+        self.assertFalse(fetcher.diagnostics["consent_handled"])
+        self.assertEqual(fetcher.diagnostics["response_kind"], "flights_results")
+
+    @patch("google_flights.time.sleep")
+    def test_real_fetcher_and_parser_classify_error_progress_without_response_secrets(self, sleep):
+        cfg = build_search_config(origin="MIL", destination="PMO", target_date=DEPARTURE.isoformat(),
+                                  date_flex_days=0, min_duration=2, max_duration=4)
+        generic = '<script class="ds:1">data:errorHasStatus: true,</script>'
+        malformed = '<script class="ds:1">SECRET_COOKIE_AND_BODY</script>'
+        client = GoogleFlightsClient()
+        client.integration = self.fetcher([SimpleNamespace(status_code=200, text=generic),
+                                           SimpleNamespace(status_code=200, text=malformed)])
+        progress = []
+        with self.assertRaises(ProviderUnavailableError) as raised:
+            list(iter_search_rows(client, cfg, on_progress=progress.append))
+        finished = [event for event in progress if event["status"] == "error"]
+        self.assertEqual([event["diagnostics"]["category"] for event in finished],
+                         ["upstream_error", "parser_error"])
+        self.assertEqual(finished[0]["diagnostics"]["exception_type"], "FlightsNotFound")
+        self.assertEqual(finished[1]["diagnostics"]["response_kind"], "flights_results")
+        self.assertEqual([event["completed"] for event in finished], [1, 2])
+        self.assertNotEqual(finished[0]["search_url"], finished[1]["search_url"])
+        for event in finished:
+            self.assertEqual(event["diagnostics"]["http_status"], 200)
+            self.assertGreaterEqual(event["diagnostics"]["elapsed_ms"], 0)
+            self.assertTrue(event["search_url"].startswith("https://www.google.com/travel/flights/search?"))
+        self.assertNotIn("SECRET_COOKIE_AND_BODY", str(raised.exception))
+
+    @patch("google_flights.get_flights", return_value=[SimpleNamespace(price="broken-secret")])
+    def test_malformed_itinerary_stops_safely_with_diagnostics(self, fetch):
+        client = GoogleFlightsClient()
+        with self.assertRaises(ProviderUnavailableError) as error:
+            client.search_offers(origin="MIL", destination="PMO", departure_date=DEPARTURE,
+                                 return_date=None, adults=1, max_results=20)
+        self.assertEqual(error.exception.diagnostics["category"], "parser_error")
+        self.assertNotIn("broken-secret", str(error.exception))
+
+    @patch("google_flights.get_flights", return_value=[])
+    def test_empty_priced_results_get_successful_empty_diagnostics(self, fetch):
+        client = GoogleFlightsClient()
+        client.search_offers(origin="MIL", destination="PMO", departure_date=DEPARTURE,
+                             return_date=None, adults=1, max_results=20)
+        self.assertEqual(client.last_query_diagnostics["category"], "no_matching_priced_results")
+        self.assertIsNone(client.last_query_diagnostics["exception_type"])

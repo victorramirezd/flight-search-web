@@ -131,10 +131,11 @@ all per-departure `failed_queries` as JSON, alongside search status and message.
   may help; the UI shows when the last pass finished. Successful queries are not rerun.
   Retries are user-triggered, with one active pass at a time.
   Recovery never erases a cheaper earlier fare. Unattempted queries remain pending;
-  retrying failures after an early stop does not resume unattempted combinations.
+  use **Continue pending dates** after an early stop to resume only unattempted combinations.
 - **Hosting:** local connectivity does not establish that Google's scraper will work
   from a Vercel data-center IP. Large flexible windows can also exceed function time limits.
-  This branch has not been deployed or tested on Vercel.
+  Production checks show some city/date pairs returning generic Google errors inside
+  HTTP 200 even when identical local queries succeed. Diagnostics preserve that distinction.
 
 ## Files
 
@@ -170,3 +171,25 @@ prices and colors, HTML/TSV clipboard output, and the existing airport catalog.
 Tests use fake provider responses; they do not
 establish current flight availability. Run a small real search separately to check
 Google connectivity.
+
+## Production search diagnostics and continuation
+
+**Retry failed dates** retries errors only. **Continue pending dates** searches only
+unattempted combinations after an early stop; successful fares and failures remain
+in the original ledger. Both actions use the original submitted settings. Each pass
+uses a fresh consent-aware session, existing pacing, and the same stop conditions.
+The API accepts the targeted pending subset through the existing validated
+`retry_queries` field; it validates the grid rather than trusting client status.
+
+The expandable **Search diagnostics** panel and failed calendar cells show the
+provider error category, Google HTTP status, response kind, and elapsed time when
+available. Completed progress events include a native Google Flights `search_url`
+even when a query fails, so dates can be checked manually. A generic Google error
+inside HTTP 200 does not establish no availability, self-transfer filtering, or IP
+blocking as its cause. HTTP 429, HTTP errors, consent errors, missing results data,
+network errors, parser errors, and interrupted streams have separate categories.
+
+Each API pass has a request ID, server region, and deployment revision. Structured
+server logs and **Copy diagnostics** can be correlated using that ID. The report
+includes date-pair outcomes and recent attempts, including recovered errors. It
+excludes the search password, cookies, consent tokens, HTTP headers, and raw HTML.

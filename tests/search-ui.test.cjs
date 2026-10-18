@@ -79,9 +79,9 @@ const recovery = new SearchState({ ...config, password: 'private-password', date
   min_duration: 2, max_duration: 4 });
 const recoveryPlan = queryPlan(recovery.config);
 recovery.begin(recoveryPlan);
-recovery.recordStart({ request_id: 'request-initial', region: 'iad1', revision: 'abc123', request_interval_seconds: 4, cookie: 'private-cookie' });
+recovery.recordStart({ request_id: 'request-initial', region: 'iad1', revision: 'abc123', query_encoding: 'browser', request_interval_seconds: 4, cookie: 'private-cookie' });
 recovery.progress({ ...recoveryPlan[0], status: 'ok', offer: { price: 100, currency: 'EUR' },
-  diagnostics: { category: 'success', http_status: 200, elapsed_ms: 100, cookie: 'private-cookie' } });
+  diagnostics: { category: 'success', http_status: 200, query_encoding: 'browser_v1', elapsed_ms: 100, cookie: 'private-cookie' } });
 recovery.mergeRow({ departure_date: recoveryPlan[0].departure_date, best_price: '100.00', currency: 'EUR' });
 recovery.progress({ ...recoveryPlan[1], status: 'running' });
 recovery.finish(true);
@@ -114,6 +114,8 @@ assert.equal(recovery.active, false);
 const report = recovery.diagnosticReport();
 assert.equal(report.requests.length, 3);
 assert.equal(report.requests[0].request_interval_seconds, 4);
+assert.equal(report.requests[0].query_encoding, 'browser');
+assert.equal(report.queries[0].attempts[0].diagnostics.query_encoding, 'browser_v1');
 assert.equal(report.requests[1].kind, 'continue');
 assert.equal(report.queries[1].attempts[0].diagnostics.category, 'stream_interrupted');
 assert.equal(report.queries[1].attempts[1].request_id, 'request-retry');

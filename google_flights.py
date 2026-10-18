@@ -23,6 +23,14 @@ REQUEST_INTERVAL_SECONDS = 1.5
 MAX_CONSECUTIVE_QUERY_ERRORS = 3
 
 
+def validate_request_interval_seconds(value):
+    """Bound experiments without changing the application's normal pacing."""
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not 1.5 <= value <= 15 or not math.isfinite(value)):
+        raise ValueError("request_interval_seconds must be a number between 1.5 and 15.")
+    return float(value)
+
+
 class FetchError(RuntimeError):
     """A safe explanation with no upstream response body or session data."""
 
@@ -114,7 +122,9 @@ def itinerary_duration(legs) -> Optional[int]:
 
 class GoogleFlightsClient:
     def __init__(self, *, min_connections: int = 0, max_connections: Optional[int] = 2,
-                 exclude_self_transfers: bool = True):
+                 exclude_self_transfers: bool = True,
+                 request_interval_seconds: float = REQUEST_INTERVAL_SECONDS):
+        self.request_interval_seconds = validate_request_interval_seconds(request_interval_seconds)
         self.integration = ConsentAwareFetcher()
         self.min_connections = min_connections
         self.max_connections = max_connections
@@ -142,17 +152,22 @@ class GoogleFlightsClient:
         self.last_search_url = query.url()
         self.integration.diagnostics = empty_diagnostics()
         # Pace date combinations; changing dates should not create a burst of requests.
+        previous_request_at = self.last_request_at
         if self.last_request_at is not None:
-            remaining = REQUEST_INTERVAL_SECONDS - (time.monotonic() - self.last_request_at)
+            remaining = self.request_interval_seconds - (time.monotonic() - self.last_request_at)
             if remaining > 0:
                 time.sleep(remaining)
         self.last_request_at = time.monotonic()
+        start_gap_ms = (round((self.last_request_at - previous_request_at) * 1000)
+                        if previous_request_at is not None else None)
         started = time.perf_counter()
 
         def diagnostics(category, exception=None):
             details = dict(self.integration.diagnostics)
             details.update(category=category, elapsed_ms=round((time.perf_counter() - started) * 1000),
-                           exception_type=type(exception).__name__ if exception else None)
+                           exception_type=type(exception).__name__ if exception else None,
+                           request_interval_seconds=self.request_interval_seconds,
+                           start_gap_ms=start_gap_ms)
             self.last_query_diagnostics = details
             return details
 

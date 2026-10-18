@@ -15,7 +15,8 @@ if str(ROOT_DIR) not in sys.path:
 
 from flight_search import (ApiError, build_search_config, iter_search_rows, search_queries,
                            validate_retry_queries)
-from google_flights import GoogleFlightsClient
+from google_flights import (GoogleFlightsClient, REQUEST_INTERVAL_SECONDS,
+                            validate_request_interval_seconds)
 
 
 SEARCH_PASSWORD = "victor"
@@ -81,6 +82,8 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
+            request_interval_seconds = validate_request_interval_seconds(
+                data.get("request_interval_seconds", REQUEST_INTERVAL_SECONDS))
             config = build_search_config(
                 origin=str(data.get("origin", "")),
                 destination=str(data.get("destination", "")),
@@ -107,12 +110,16 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         request_id = str(uuid.uuid4())
-        metadata = {"request_id": request_id, **deployment_metadata()}
+        metadata = {"request_id": request_id, **deployment_metadata(),
+                    "request_interval_seconds": request_interval_seconds}
         rows = []
         ledger = {q.payload()["query_id"]: {**q.payload(), "status": "pending", "message": ""}
                   for q in plan}
 
         def report_progress(event):
+            if event["status"] != "running":
+                event["diagnostics"] = {**event.get("diagnostics", {}),
+                                        "request_interval_seconds": request_interval_seconds}
             ledger[event["query_id"]].update(event)
             if event["status"] != "running":
                 diagnostic_log("flight_query", request_id, query_id=event["query_id"],
@@ -127,7 +134,8 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             diagnostic_log("flight_search_start", request_id, **deployment_metadata(),
-                           total=len(plan), is_retry="retry_queries" in data)
+                           total=len(plan), is_retry="retry_queries" in data,
+                           request_interval_seconds=request_interval_seconds)
             stream_event(
                 self,
                 {
@@ -145,6 +153,7 @@ class handler(BaseHTTPRequestHandler):
                 min_connections=config.min_connections_per_slice,
                 max_connections=config.max_connections_per_slice,
                 exclude_self_transfers=config.exclude_self_transfers,
+                request_interval_seconds=request_interval_seconds,
             )
             for row in iter_search_rows(client, config, queries=plan, on_progress=report_progress):
                 rows.append(row)
@@ -152,19 +161,21 @@ class handler(BaseHTTPRequestHandler):
         except ApiError as err:
             terminal = terminal_details()
             diagnostic_log("flight_search_error", request_id, completed=terminal["completed"],
-                           total=len(plan), diagnostics=err.diagnostics)
+                           total=len(plan), diagnostics=err.diagnostics,
+                           request_interval_seconds=request_interval_seconds)
             stream_event(self, {"type": "error", "error": str(err), "status": 502,
                                 "searched": len(rows), "incomplete": True,
                                 "diagnostics": err.diagnostics, **terminal})
             return
         except (BrokenPipeError, ConnectionResetError):
             diagnostic_log("flight_search_disconnected", request_id,
-                           completed=terminal_details()["completed"], total=len(plan))
+                           completed=terminal_details()["completed"], total=len(plan),
+                           request_interval_seconds=request_interval_seconds)
             return
 
         terminal = terminal_details()
         diagnostic_log("flight_search_done", request_id, completed=terminal["completed"], total=len(plan),
-                       failed=len(terminal["failed_queries"]))
+                       failed=len(terminal["failed_queries"]), request_interval_seconds=request_interval_seconds)
         stream_event(self, {"type": "done", "rows": rows, "searched": len(rows), **terminal})
 
     def do_OPTIONS(self) -> None:

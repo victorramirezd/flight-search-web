@@ -123,6 +123,49 @@ runpy.run_module('flight_search', run_name='__main__', alter_sys=True)
 
 
 class RetryEndpointTest(unittest.TestCase):
+    def test_request_interval_is_validated_before_stream_or_client_creation(self):
+        payload = dict(password="Victor", origin="MIL", destination="PMO", target_date=DEPARTURE.isoformat(),
+                       date_flex_days=0, min_duration=2, max_duration=4)
+        invalid = [True, False, None, "4", "", {}, [], float("nan"), float("inf"),
+                   -float("inf"), 0, -1, 1.499, 15.001, 10 ** 1000]
+        with endpoint() as address, patch("api.search.GoogleFlightsClient") as Client, \
+                patch("api.search.sys.stderr", new_callable=io.StringIO):
+            for value in invalid:
+                with self.subTest(value=value):
+                    status, body = post(address, {**payload, "request_interval_seconds": value})
+                    self.assertEqual(status, 400)
+                    self.assertIn("request_interval_seconds", json.loads(body)["error"])
+                    self.assertNotIn(b'"type": "start"', body)
+            Client.assert_not_called()
+
+    def test_intervals_pass_through_original_and_saved_targeted_retry_with_metadata(self):
+        payload = dict(password="Victor", origin="MIL", destination="LON", target_date=DEPARTURE.isoformat(),
+                       date_flex_days=0, min_duration=12, max_duration=17)
+        pair = search_queries(config())[2].payload()
+        with endpoint() as address, patch("api.search.GoogleFlightsClient") as Client, \
+                patch("api.search.sys.stderr", new_callable=io.StringIO) as logs:
+            Client.return_value.search_offers.return_value = []
+            for interval in (1.5, 4, 8):
+                saved = {**payload, "request_interval_seconds": interval}
+                for is_retry in (False, True):
+                    with self.subTest(interval=interval, retry=is_retry):
+                        request = {**saved, "retry_queries": [pair]} if is_retry else saved
+                        status, body = post(address, request)
+                        self.assertEqual(status, 200)
+                        events = [json.loads(line) for line in body.splitlines()]
+                        self.assertEqual(Client.call_args.kwargs["request_interval_seconds"], interval)
+                        self.assertEqual(events[0]["request_interval_seconds"], interval)
+                        self.assertEqual(events[-1]["request_interval_seconds"], interval)
+                        self.assertEqual(events[0]["is_retry"], is_retry)
+                        completed = [event for event in events
+                                     if event["type"] == "progress" and event["status"] != "running"]
+                        self.assertTrue(completed)
+                        self.assertTrue(all(event["diagnostics"]["request_interval_seconds"] == interval
+                                            for event in completed))
+                        if is_retry:
+                            self.assertEqual(events[0]["queries"], [pair])
+            self.assertIn('"request_interval_seconds": 8.0', logs.getvalue())
+
     def test_stream_diagnostics_correlate_with_safe_logs_and_preserve_pending_queries(self):
         from types import SimpleNamespace
         payload = dict(password="Victor", origin="MIL", destination="PMO", target_date=DEPARTURE.isoformat(),
@@ -145,6 +188,9 @@ class RetryEndpointTest(unittest.TestCase):
         self.assertEqual(start["revision"], "a" * 40)
         self.assertEqual(terminal["diagnostics"]["category"], "http_rate_limited")
         self.assertEqual(terminal["diagnostics"]["http_status"], 429)
+        self.assertEqual(start["request_interval_seconds"], 1.5)
+        self.assertEqual(terminal["request_interval_seconds"], 1.5)
+        self.assertEqual(terminal["diagnostics"]["request_interval_seconds"], 1.5)
         self.assertEqual(terminal["completed"], 2)
         self.assertEqual(len(terminal["failed_queries"]), 2)
         self.assertEqual(len(terminal["pending_queries"]), 1)

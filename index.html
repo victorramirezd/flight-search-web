@@ -1166,7 +1166,7 @@
         cityHint.textContent = cities.length ? `For a narrower search, you can select an individual airport: ${cities.map(place => `${place.code} includes ${place.airport_codes.join(", ")}`).join("; ")}. This changes the airports covered by the search.` : "";
         const request = currentSearch.currentRequest;
         document.querySelector("#requestDetails").textContent = request?.request_id
-          ? `Request ${request.request_id} · Server ${request.region || "unknown"}${request.revision ? ` · Revision ${request.revision}` : ""}`
+          ? `Request ${request.request_id} · Server ${request.region || "unknown"}${request.revision ? ` · Revision ${request.revision}` : ""}${request.request_interval_seconds ? ` · Request interval ${request.request_interval_seconds}s` : ""}`
           : "Request details will appear when the server starts responding.";
         document.querySelector("#diagnosticErrors").innerHTML = failures.length
           ? '<ul>' + failures.map(query => {

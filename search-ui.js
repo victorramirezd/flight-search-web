@@ -3,7 +3,7 @@
   const finished = new Set(['ok', 'no_offers', 'error']);
   const effectiveStatus = q => finished.has(q.status) ? q.status : q.previous_status || q.status;
   const diagnosticKeys = ['category', 'http_status', 'response_kind', 'consent_handled', 'elapsed_ms',
-    'exception_type', 'upstream_error', 'consecutive_errors', 'retry_after_seconds', 'result_count', 'google_error_payload'];
+    'request_interval_seconds', 'start_gap_ms', 'exception_type', 'upstream_error', 'consecutive_errors', 'retry_after_seconds', 'result_count', 'google_error_payload'];
   const safeDiagnostics = value => Object.fromEntries(diagnosticKeys
     .filter(key => value && ['string', 'number', 'boolean'].includes(typeof value[key]))
     .map(key => [key, value[key]]));
@@ -99,6 +99,7 @@
     recordStart(event) {
       const metadata = Object.fromEntries(['request_id', 'region', 'revision', 'started_at']
         .filter(key => typeof event[key] === 'string').map(key => [key, event[key]]));
+      if (Number.isFinite(event.request_interval_seconds)) metadata.request_interval_seconds = event.request_interval_seconds;
       this.currentRequest = metadata;
       this.requests.push({ ...metadata, kind: this.resuming ? 'continue' : this.retrying ? 'retry' : 'search',
         total: this.passIds.size });

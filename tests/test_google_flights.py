@@ -149,6 +149,42 @@ class GoogleFlightsTest(unittest.TestCase):
         self.search(client, return_date=DEPARTURE + timedelta(days=7))
         sleep.assert_called_once_with(1.25)
 
+    @patch("google_flights.get_flights", return_value=[])
+    def test_configured_intervals_pace_request_starts_and_record_actual_gap(self, fetch):
+        for interval in (1.5, 4, 8):
+            with self.subTest(interval=interval), patch("google_flights.time.sleep") as sleep, \
+                    patch("google_flights.time.monotonic", side_effect=[100, 100.25, 100 + interval]):
+                client = GoogleFlightsClient(request_interval_seconds=interval)
+                self.search(client)
+                self.assertIsNone(client.last_query_diagnostics["start_gap_ms"])
+                self.search(client, return_date=DEPARTURE + timedelta(days=7))
+                sleep.assert_called_once_with(interval - 0.25)
+                self.assertEqual(client.request_interval_seconds, interval)
+                self.assertEqual(client.last_query_diagnostics["request_interval_seconds"], interval)
+                self.assertEqual(client.last_query_diagnostics["start_gap_ms"], interval * 1000)
+
+    @patch("google_flights.get_flights", return_value=[])
+    def test_elapsed_slow_response_needs_no_additional_wait(self, fetch):
+        for interval in (1.5, 4, 8):
+            with self.subTest(interval=interval), patch("google_flights.time.sleep") as sleep, \
+                    patch("google_flights.time.monotonic", side_effect=[100, 110, 110]):
+                client = GoogleFlightsClient(request_interval_seconds=interval)
+                self.search(client)
+                self.search(client, return_date=DEPARTURE + timedelta(days=7))
+                sleep.assert_not_called()
+                self.assertEqual(client.last_query_diagnostics["start_gap_ms"], 10000)
+
+    def test_request_interval_constructor_validation_before_creating_session(self):
+        invalid = [True, False, None, "4", "", {}, [], float("nan"), float("inf"),
+                   -float("inf"), 0, -1, 1.499, 15.001, 10 ** 1000]
+        with patch("google_flights.ConsentAwareFetcher") as fetcher:
+            for value in invalid:
+                with self.subTest(value=value), self.assertRaisesRegex(ValueError, "between 1.5 and 15"):
+                    GoogleFlightsClient(request_interval_seconds=value)
+            fetcher.assert_not_called()
+        self.assertEqual(GoogleFlightsClient().request_interval_seconds, 1.5)
+        self.assertEqual(GoogleFlightsClient(request_interval_seconds=15).request_interval_seconds, 15)
+
     @patch("google_flights.time.sleep")
     @patch("google_flights.get_flights")
     def test_cli_exports_partial_results_and_exits_nonzero_when_stopped(self, fetch, sleep):

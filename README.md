@@ -193,3 +193,27 @@ Each API pass has a request ID, server region, and deployment revision. Structur
 server logs and **Copy diagnostics** can be correlated using that ID. The report
 includes date-pair outcomes and recent attempts, including recovered errors. It
 excludes the search password, cookies, consent tokens, HTTP headers, and raw HTML.
+
+## Comparing production request pacing
+
+`POST /api/search` accepts optional `request_interval_seconds` between 1.5 and 15.
+This is the minimum gap between starts of Google date-pair requests, not an extra
+pause after a response. The first query starts immediately. The selected interval
+and observed start gap are recorded in diagnostics; filters, session reuse, retry
+policy and stop conditions remain the same.
+
+To repeat the bounded LIM→MIL comparison after deploying this option, set
+`FLIGHT_SEARCH_PASSWORD` in your environment, then run:
+
+```sh
+.venv-google/bin/python scripts/compare_search_pacing.py
+```
+
+The script compares nine date pairs at 4, 1.5 and 8 seconds, then reverses that order,
+using a fresh session per pass and a 30-second cooldown between passes. It makes no
+automatic date-pair retries. A pass may end early under the existing stop conditions;
+its unattempted queries are recorded separately rather than counted as failures.
+HTTP blocking or stream interruptions stop the experiment. Raw events and a summary
+without the password are written under ignored `work/diagnostics/pacing-comparison`.
+The small live sample can show an operational difference; it does not establish
+Google's internal reason for any failure.

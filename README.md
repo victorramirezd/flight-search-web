@@ -27,6 +27,19 @@ The dependency files pin fast-flights to upstream commit
 the version installed for the skill, and primp to the tested Chrome-145-capable version.
 `typing_extensions` is included explicitly because upstream omits it from its dependencies.
 
+## Request encoding
+
+Searches and generated links use a browser-compatible protobuf envelope, tested
+against matching Google Flights UI-generated city and airport URLs captured on
+18 October 2026. Verified metropolitan entity IDs are stored in
+`data/google-city-entities.json`; unmapped cities retain their native IATA code.
+The pinned library remains responsible for filters and result parsing.
+
+For controlled diagnostics, `POST /api/search` accepts `query_encoding`:
+`browser` (default) or `legacy` (the previous library encoding). This setting
+appears in diagnostic exports. It does not change pacing, sessions or retries.
+Matching browser serialization does not guarantee Google will return results.
+
 ## Try a small search first
 
 Choose **cities or individual airports** (for example, MIL/LON or FCO/LHR), a future departure date,

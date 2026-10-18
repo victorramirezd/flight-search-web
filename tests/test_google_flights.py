@@ -249,7 +249,7 @@ class GoogleFlightsTest(unittest.TestCase):
 
     @patch("google_flights.get_flights", return_value=[])
     def test_transfer_filter_is_in_query_and_google_link(self, fetch):
-        from base64 import b64decode
+        from base64 import urlsafe_b64decode
         from urllib.parse import parse_qs, urlparse
         from fast_flights.pb.flights_pb2 import Info
         for excluded in (True, False):
@@ -257,7 +257,7 @@ class GoogleFlightsTest(unittest.TestCase):
             query = fetch.call_args.args[0]
             self.assertEqual(query.hide_separate_and_self_transfer, excluded)
             encoded = parse_qs(urlparse(query.url()).query)["tfs"][0]
-            self.assertEqual(Info.FromString(b64decode(encoded)).hide_separate_and_self_transfer, excluded)
+            self.assertEqual(Info.FromString(urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))).hide_separate_and_self_transfer, excluded)
 
     @patch("google_flights.get_flights", return_value=[])
     def test_cli_can_include_self_transfers(self, fetch):

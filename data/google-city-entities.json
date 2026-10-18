@@ -1,0 +1,15 @@
+{
+  "observed_on": "2026-10-18",
+  "source": "Google Flights UI-generated searches and structured city metadata in anonymous Google Flights responses",
+  "entity_type": "3 is the city entity type observed in current submitted Google Flights searches",
+  "entities": {
+    "LON": {"id": "/m/04jpl", "type": 3},
+    "MIL": {"id": "/m/0947l", "type": 3},
+    "NYC": {"id": "/m/02_286", "type": 3},
+    "PAR": {"id": "/m/05qtj", "type": 3},
+    "RIO": {"id": "/m/06gmr", "type": 3},
+    "ROM": {"id": "/m/06c62", "type": 3},
+    "SAO": {"id": "/m/022pfm", "type": 3},
+    "YTO": {"id": "/m/0h7h6", "type": 3}
+  }
+}

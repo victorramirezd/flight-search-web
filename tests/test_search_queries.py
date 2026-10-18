@@ -123,6 +123,50 @@ runpy.run_module('flight_search', run_name='__main__', alter_sys=True)
 
 
 class RetryEndpointTest(unittest.TestCase):
+    def test_query_encoding_validation_precedes_stream_and_provider_creation(self):
+        payload = dict(password="Victor", origin="MIL", destination="PMO", target_date=DEPARTURE.isoformat(),
+                       date_flex_days=4, min_duration=2, max_duration=2)
+        with endpoint() as address, patch("api.search.GoogleFlightsClient") as Client, \
+                patch("api.search.sys.stderr", new_callable=io.StringIO):
+            for value in (True, False, None, "", "Browser", "legacy ", "unknown", 1, [], {}):
+                with self.subTest(value=value):
+                    status, body = post(address, {**payload, "query_encoding": value})
+                    self.assertEqual(status, 400)
+                    self.assertIn("query_encoding", json.loads(body)["error"])
+                    self.assertNotIn(b'"type": "start"', body)
+            Client.assert_not_called()
+
+    def test_browser_default_and_legacy_override_reach_grid_and_targeted_retry(self):
+        payload = dict(password="Victor", origin="MIL", destination="PMO", target_date=DEPARTURE.isoformat(),
+                       date_flex_days=4, min_duration=2, max_duration=2)
+        cfg = config(origin="MIL", destination="PMO", date_flex_days=4, min_duration=2, max_duration=2)
+        pair = search_queries(cfg)[4].payload()
+        with endpoint() as address, patch("api.search.GoogleFlightsClient") as Client, \
+                patch("api.search.sys.stderr", new_callable=io.StringIO) as logs:
+            Client.return_value.search_offers.return_value = []
+            for encoding in ("browser", "legacy"):
+                saved = payload if encoding == "browser" else {**payload, "query_encoding": encoding}
+                for is_retry in (False, True):
+                    with self.subTest(encoding=encoding, retry=is_retry):
+                        Client.reset_mock()
+                        request = {**saved, "retry_queries": [pair]} if is_retry else saved
+                        status, body = post(address, request)
+                        self.assertEqual(status, 200)
+                        events = [json.loads(line) for line in body.splitlines()]
+                        self.assertEqual(Client.call_args.kwargs["query_encoding"], encoding)
+                        self.assertEqual(Client.return_value.search_offers.call_count, 1 if is_retry else 9)
+                        self.assertEqual(events[0]["query_encoding"], encoding)
+                        self.assertEqual(events[-1]["query_encoding"], encoding)
+                        self.assertEqual(events[0]["is_retry"], is_retry)
+                        completed = [event for event in events
+                                     if event["type"] == "progress" and event["status"] != "running"]
+                        self.assertTrue(all(event["diagnostics"]["query_encoding"] == encoding
+                                            for event in completed))
+                        if is_retry:
+                            self.assertEqual(events[0]["queries"], [pair])
+            self.assertIn('"query_encoding": "browser"', logs.getvalue())
+            self.assertIn('"query_encoding": "legacy"', logs.getvalue())
+
     def test_request_interval_is_validated_before_stream_or_client_creation(self):
         payload = dict(password="Victor", origin="MIL", destination="PMO", target_date=DEPARTURE.isoformat(),
                        date_flex_days=0, min_duration=2, max_duration=4)
@@ -191,6 +235,9 @@ class RetryEndpointTest(unittest.TestCase):
         self.assertEqual(start["request_interval_seconds"], 1.5)
         self.assertEqual(terminal["request_interval_seconds"], 1.5)
         self.assertEqual(terminal["diagnostics"]["request_interval_seconds"], 1.5)
+        self.assertEqual(start["query_encoding"], "browser")
+        self.assertEqual(terminal["query_encoding"], "browser")
+        self.assertEqual(terminal["diagnostics"]["query_encoding"], "browser_v1")
         self.assertEqual(terminal["completed"], 2)
         self.assertEqual(len(terminal["failed_queries"]), 2)
         self.assertEqual(len(terminal["pending_queries"]), 1)

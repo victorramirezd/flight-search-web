@@ -17,6 +17,8 @@ from fast_flights.integrations.base import FetchIntegration
 from primp import Client
 from selectolax.lexbor import LexborHTMLParser
 
+from google_query import ENCODING_VERSION, with_browser_encoding
+
 from flight_search import ApiError, ProviderUnavailableError, location_airport_codes
 
 REQUEST_INTERVAL_SECONDS = 1.5
@@ -123,7 +125,11 @@ def itinerary_duration(legs) -> Optional[int]:
 class GoogleFlightsClient:
     def __init__(self, *, min_connections: int = 0, max_connections: Optional[int] = 2,
                  exclude_self_transfers: bool = True,
-                 request_interval_seconds: float = REQUEST_INTERVAL_SECONDS):
+                 request_interval_seconds: float = REQUEST_INTERVAL_SECONDS,
+                 query_encoding: str = "browser"):
+        if not isinstance(query_encoding, str) or query_encoding not in {"browser", "legacy"}:
+            raise ValueError("query_encoding must be browser or legacy")
+        self.query_encoding = query_encoding
         self.request_interval_seconds = validate_request_interval_seconds(request_interval_seconds)
         self.integration = ConsentAwareFetcher()
         self.min_connections = min_connections
@@ -149,6 +155,8 @@ class GoogleFlightsClient:
             max_stops=self.max_connections,
             hide_separate_and_self_transfer=self.exclude_self_transfers,
         )
+        if self.query_encoding == "browser":
+            query = with_browser_encoding(query)
         self.last_search_url = query.url()
         self.integration.diagnostics = empty_diagnostics()
         # Pace date combinations; changing dates should not create a burst of requests.
@@ -168,6 +176,7 @@ class GoogleFlightsClient:
                            exception_type=type(exception).__name__ if exception else None,
                            request_interval_seconds=self.request_interval_seconds,
                            start_gap_ms=start_gap_ms)
+            details["query_encoding"] = ENCODING_VERSION if self.query_encoding == "browser" else "legacy"
             self.last_query_diagnostics = details
             return details
 

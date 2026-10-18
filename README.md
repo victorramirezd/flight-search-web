@@ -1,7 +1,11 @@
-# Flight Search Tool — Google Flights experiment
+# Flight Search Tool — Google Flights
 
-The `codex/google-flights-search` branch uses **Google Flights via fast-flights 3.1.0**
-instead of Duffel for both the website and CLI. No Duffel token is needed for searches.
+The `main` branch uses **Google Flights via fast-flights 3.1.0** for both the website
+and CLI. No Duffel token is needed for searches.
+
+The [`duffel-version`](https://github.com/victorramirezd/flight-search-web/tree/duffel-version)
+branch preserves the Duffel implementation with the updated UI, progress display,
+manual retries, price calendar, and Excel copying. It still requires `DUFFEL_ACCESS_TOKEN`.
 The consent-aware fetcher rejects optional cookies using Google's returned form and
 reuses the same HTTP session, following the local `flight-search` skill.
 

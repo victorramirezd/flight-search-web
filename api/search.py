@@ -16,7 +16,7 @@ if str(ROOT_DIR) not in sys.path:
 from flight_search import (ApiError, build_search_config, iter_search_rows, search_queries,
                            validate_retry_queries)
 from google_flights import (GoogleFlightsClient, REQUEST_INTERVAL_SECONDS,
-                            validate_request_interval_seconds)
+                            REQUEST_COUNTERS, validate_request_interval_seconds, validate_session_mode)
 
 
 SEARCH_PASSWORD = "victor"
@@ -82,6 +82,7 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
+            session_mode = validate_session_mode(data.get('session_mode', 'shared'))
             query_encoding = data.get("query_encoding", "browser")
             if not isinstance(query_encoding, str) or query_encoding not in {"browser", "legacy"}:
                 raise ValueError("query_encoding must be 'browser' or 'legacy'.")
@@ -115,7 +116,7 @@ class handler(BaseHTTPRequestHandler):
         request_id = str(uuid.uuid4())
         metadata = {"request_id": request_id, **deployment_metadata(),
                     "request_interval_seconds": request_interval_seconds,
-                    "query_encoding": query_encoding}
+                    "query_encoding": query_encoding, "session_mode": session_mode}
         rows = []
         ledger = {q.payload()["query_id"]: {**q.payload(), "status": "pending", "message": ""}
                   for q in plan}
@@ -124,16 +125,20 @@ class handler(BaseHTTPRequestHandler):
             if event["status"] != "running":
                 event["diagnostics"] = {**event.get("diagnostics", {}),
                                         "request_interval_seconds": request_interval_seconds,
+                                        "session_mode": session_mode,
                                         "query_encoding": event.get("diagnostics", {}).get("query_encoding", query_encoding)}
             ledger[event["query_id"]].update(event)
             if event["status"] != "running":
                 diagnostic_log("flight_query", request_id, query_id=event["query_id"],
                                status=event["status"], diagnostics=event.get("diagnostics", {}),
-                               query_encoding=query_encoding)
+                               query_encoding=query_encoding, session_mode=session_mode)
             stream_event(self, {"type": "progress", **event})
 
         def terminal_details():
-            return {**metadata, "failed_queries": [q for q in ledger.values() if q["status"] == "error"],
+            counts = {key: sum(q.get('diagnostics', {}).get(key, 0) for q in ledger.values())
+                      for key in REQUEST_COUNTERS}
+            return {**metadata, "request_counts": counts,
+                    "failed_queries": [q for q in ledger.values() if q["status"] == "error"],
                     "pending_queries": [q for q in ledger.values() if q["status"] == "pending"],
                     "completed": sum(q["status"] not in {"pending", "running"} for q in ledger.values()),
                     "total": len(plan)}
@@ -141,7 +146,7 @@ class handler(BaseHTTPRequestHandler):
         try:
             diagnostic_log("flight_search_start", request_id, **deployment_metadata(),
                            total=len(plan), is_retry="retry_queries" in data,
-                           request_interval_seconds=request_interval_seconds, query_encoding=query_encoding)
+                           request_interval_seconds=request_interval_seconds, query_encoding=query_encoding, session_mode=session_mode)
             stream_event(
                 self,
                 {
@@ -161,6 +166,7 @@ class handler(BaseHTTPRequestHandler):
                 exclude_self_transfers=config.exclude_self_transfers,
                 request_interval_seconds=request_interval_seconds,
                 query_encoding=query_encoding,
+                session_mode=session_mode,
             )
             for row in iter_search_rows(client, config, queries=plan, on_progress=report_progress):
                 rows.append(row)
@@ -169,7 +175,7 @@ class handler(BaseHTTPRequestHandler):
             terminal = terminal_details()
             diagnostic_log("flight_search_error", request_id, completed=terminal["completed"],
                            total=len(plan), diagnostics=err.diagnostics,
-                           request_interval_seconds=request_interval_seconds, query_encoding=query_encoding)
+                           request_interval_seconds=request_interval_seconds, query_encoding=query_encoding, session_mode=session_mode)
             stream_event(self, {"type": "error", "error": str(err), "status": 502,
                                 "searched": len(rows), "incomplete": True,
                                 "diagnostics": err.diagnostics, **terminal})
@@ -177,13 +183,13 @@ class handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             diagnostic_log("flight_search_disconnected", request_id,
                            completed=terminal_details()["completed"], total=len(plan),
-                           request_interval_seconds=request_interval_seconds, query_encoding=query_encoding)
+                           request_interval_seconds=request_interval_seconds, query_encoding=query_encoding, session_mode=session_mode)
             return
 
         terminal = terminal_details()
         diagnostic_log("flight_search_done", request_id, completed=terminal["completed"], total=len(plan),
                        failed=len(terminal["failed_queries"]), request_interval_seconds=request_interval_seconds,
-                       query_encoding=query_encoding)
+                       query_encoding=query_encoding, session_mode=session_mode)
         stream_event(self, {"type": "done", "rows": rows, "searched": len(rows), **terminal})
 
     def do_OPTIONS(self) -> None:

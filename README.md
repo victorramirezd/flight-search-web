@@ -232,3 +232,36 @@ HTTP blocking or stream interruptions stop the experiment. Raw events and a summ
 without the password are written under ignored `work/diagnostics/pacing-comparison`.
 The small live sample can show an operational difference; it does not establish
 Google's internal reason for any failure.
+
+
+## Comparing Google session reuse
+
+`POST /api/search` accepts optional `session_mode`: `shared` (default, one Google
+HTTP client/cookie jar per API pass) or `fresh` (a new client/cookie jar per date
+pair). Fresh mode preserves the pass's pacing and consecutive-error stop count.
+This is an experiment setting; the public form and CLI retain the shared default.
+
+Completed query diagnostics include `session_mode`, `session_index`,
+`http_requests`, `flight_get_requests`, `consent_post_requests` and
+`consent_refetch_requests`. Terminal events sum the four request counters under
+`request_counts`. These count explicit HTTP client call attempts, including
+failed calls; they do not count redirects followed internally by the HTTP
+library. A handled consent form normally adds one POST and one extra flight GET.
+The refetch counter is a subset of flight GETs: do not add both to the total.
+Cookies, consent form values and tokens are never included in these diagnostics.
+
+For a bounded four-pass comparison at fixed pacing and region:
+
+```sh
+.venv-google/bin/python scripts/compare_search_pacing.py \
+  --intervals 1.5,1.5,1.5,1.5 --session-modes shared,fresh,fresh,shared \
+  --expected-region iad1 --cooldown-seconds 30 \
+  --output-dir work/diagnostics/session-comparison
+```
+
+Set `FLIGHT_SEARCH_PASSWORD` in the environment first. Pass `--expected-revision`
+with the full deployment commit to guard against a version change during the
+experiment. Each pass starts with a new session; within a pass only fresh mode
+replaces the Google session between date pairs. The runner records per-query
+outcomes, pending pairs, session counts and consent overhead without automatic
+retries. It stops on HTTP blocking, consent failures or interrupted streams.

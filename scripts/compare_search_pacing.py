@@ -17,6 +17,9 @@ def main():
     parser.add_argument('--base-url', default='https://www.travelling-alpaca.com')
     parser.add_argument('--intervals', default='4,1.5,8,8,1.5,4')
     parser.add_argument('--encodings', default='browser', help='One mode for all passes or comma-separated browser/legacy modes matching intervals.')
+    parser.add_argument('--session-modes', default='shared', help='One mode or comma-separated shared/fresh modes matching intervals.')
+    parser.add_argument('--expected-region', help='Abort if the API executes in another region.')
+    parser.add_argument('--expected-revision', help='Abort if the deployment revision changes.')
     parser.add_argument('--cooldown-seconds', type=float, default=30)
     parser.add_argument('--output-dir', default='work/diagnostics/pacing-comparison')
     args = parser.parse_args()
@@ -31,6 +34,11 @@ def main():
         encodings *= len(intervals)
     if len(encodings) != len(intervals) or any(mode not in {'browser', 'legacy'} for mode in encodings):
         parser.error('Encodings must be browser/legacy and match the number of intervals.')
+    session_modes = args.session_modes.split(',')
+    if len(session_modes) == 1:
+        session_modes *= len(intervals)
+    if len(session_modes) != len(intervals) or any(mode not in {'shared', 'fresh'} for mode in session_modes):
+        parser.error('Session modes must be shared/fresh and match the number of intervals.')
     if not 0 <= args.cooldown_seconds <= 120:
         parser.error('Cooldown must be between 0 and 120 seconds.')
     output = Path(args.output_dir)
@@ -44,18 +52,18 @@ def main():
                            max_results_per_query=20, exclude_self_transfers=True,
                            retry_queries=queries)
     manifest = dict(started_at=datetime.now(timezone.utc).isoformat(),
-                    base_url=args.base_url, intervals=intervals, encodings=encodings, cooldown_seconds=args.cooldown_seconds,
+                    base_url=args.base_url, intervals=intervals, encodings=encodings, session_modes=session_modes, cooldown_seconds=args.cooldown_seconds,
                     settings=public_settings, passes=[])
-    for index, (interval, encoding) in enumerate(zip(intervals, encodings), 1):
+    for index, (interval, encoding, session_mode) in enumerate(zip(intervals, encodings, session_modes), 1):
         if index > 1:
             print(json.dumps(dict(event='cooldown', seconds=args.cooldown_seconds)), flush=True)
             time.sleep(args.cooldown_seconds)
-        print(json.dumps(dict(event='pass_start', pass_number=index, interval_seconds=interval, query_encoding=encoding)), flush=True)
-        payload = dict(public_settings, password=password, request_interval_seconds=interval, query_encoding=encoding)
+        print(json.dumps(dict(event='pass_start', pass_number=index, interval_seconds=interval, query_encoding=encoding, session_mode=session_mode)), flush=True)
+        payload = dict(public_settings, password=password, request_interval_seconds=interval, query_encoding=encoding, session_mode=session_mode)
         started = time.monotonic()
         events = []
         stop = False
-        with (output / f'pass-{index}-{encoding}-{interval:g}s.ndjson').open('w') as log:
+        with (output / f'pass-{index}-{encoding}-{session_mode}-{interval:g}s.ndjson').open('w') as log:
             with requests.post(args.base_url.rstrip('/') + '/api/search', json=payload,
                                stream=True, timeout=(15, 60)) as response:
                 response.raise_for_status()
@@ -67,6 +75,12 @@ def main():
                     log.write(json.dumps(event) + '\n')
                     log.flush()
                     if event['type'] == 'start':
+                        if event.get('session_mode') != session_mode:
+                            raise RuntimeError('Deployment did not confirm the requested session mode.')
+                        if args.expected_region and event.get('region') != args.expected_region:
+                            raise RuntimeError('Unexpected function region; comparison aborted.')
+                        if args.expected_revision and event.get('revision') != args.expected_revision:
+                            raise RuntimeError('Unexpected deployment revision; comparison aborted.')
                         if event.get('query_encoding') != encoding:
                             raise RuntimeError('Production did not confirm the requested encoding; comparison aborted.')
                         if event.get('request_interval_seconds') != interval:
@@ -78,7 +92,13 @@ def main():
         finished = [e for e in events if e['type'] == 'progress' and e['status'] != 'running']
         terminal = next((e for e in reversed(events) if e['type'] in {'done', 'error'}), {})
         metadata = next((e for e in events if e['type'] == 'start'), {})
+        counts = {key: sum(e.get('diagnostics', {}).get(key, 0) for e in finished)
+                  for key in ('http_requests', 'flight_get_requests', 'consent_post_requests', 'consent_refetch_requests')}
+        if terminal and terminal.get('request_counts') != counts:
+            raise RuntimeError('Per-query and terminal request totals differ.')
         summary = dict(pass_number=index, interval_seconds=interval, query_encoding=encoding,
+                       session_mode=session_mode, request_counts=counts,
+                       sessions_created=max((e.get('diagnostics', {}).get('session_index', 0) for e in finished), default=0),
                        duration_seconds=round(time.monotonic() - started, 2),
                        attempted=len(finished), planned=len(queries),
                        priced=sum(e['status'] == 'ok' for e in finished),

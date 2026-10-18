@@ -23,6 +23,14 @@ from flight_search import ApiError, ProviderUnavailableError, location_airport_c
 
 REQUEST_INTERVAL_SECONDS = 1.5
 MAX_CONSECUTIVE_QUERY_ERRORS = 3
+REQUEST_COUNTERS = ('http_requests', 'flight_get_requests', 'consent_post_requests',
+                    'consent_refetch_requests')
+
+
+def validate_session_mode(value):
+    if not isinstance(value, str) or value not in {'shared', 'fresh'}:
+        raise ValueError("session_mode must be 'shared' or 'fresh'.")
+    return value
 
 
 def validate_request_interval_seconds(value):
@@ -40,7 +48,7 @@ class FetchError(RuntimeError):
 def empty_diagnostics():
     return {"category": "unknown", "http_status": None, "response_kind": "unknown",
             "consent_handled": False, "elapsed_ms": 0, "exception_type": None,
-            "upstream_error": False}
+            "upstream_error": False, **dict.fromkeys(REQUEST_COUNTERS, 0)}
 
 
 class ConsentAwareFetcher(FetchIntegration):
@@ -58,6 +66,8 @@ class ConsentAwareFetcher(FetchIntegration):
         params = query.params() if not isinstance(query, str) else {"q": query}
         url = "https://www.google.com/travel/flights"
         try:
+            self.diagnostics['http_requests'] += 1
+            self.diagnostics['flight_get_requests'] += 1
             response = self.client.get(url, params=params)
         except Exception as exc:
             self.diagnostics.update(category="network_error", response_kind="network_error")
@@ -71,12 +81,17 @@ class ConsentAwareFetcher(FetchIntegration):
             if data.get("set_eom") == "true":
                 self.diagnostics.update(consent_handled=True, response_kind="consent")
                 try:
+                    self.diagnostics['http_requests'] += 1
+                    self.diagnostics['consent_post_requests'] += 1
                     consent = self.client.post("https://consent.google.com/save", data=data)
                 except Exception as exc:
                     self.diagnostics.update(category="consent_error")
                     raise FetchError("Google consent request could not complete") from exc
                 self.check_status(consent)
                 try:
+                    self.diagnostics['http_requests'] += 1
+                    self.diagnostics['flight_get_requests'] += 1
+                    self.diagnostics['consent_refetch_requests'] += 1
                     response = self.client.get(url, params=params)
                 except Exception as exc:
                     self.diagnostics.update(category="network_error", response_kind="network_error")
@@ -126,12 +141,14 @@ class GoogleFlightsClient:
     def __init__(self, *, min_connections: int = 0, max_connections: Optional[int] = 2,
                  exclude_self_transfers: bool = True,
                  request_interval_seconds: float = REQUEST_INTERVAL_SECONDS,
-                 query_encoding: str = "browser"):
+                 query_encoding: str = "browser", session_mode: str = "shared"):
         if not isinstance(query_encoding, str) or query_encoding not in {"browser", "legacy"}:
             raise ValueError("query_encoding must be browser or legacy")
         self.query_encoding = query_encoding
+        self.session_mode = validate_session_mode(session_mode)
         self.request_interval_seconds = validate_request_interval_seconds(request_interval_seconds)
         self.integration = ConsentAwareFetcher()
+        self.sessions_created = 1
         self.min_connections = min_connections
         self.max_connections = max_connections
         self.exclude_self_transfers = exclude_self_transfers
@@ -158,13 +175,18 @@ class GoogleFlightsClient:
         if self.query_encoding == "browser":
             query = with_browser_encoding(query)
         self.last_search_url = query.url()
-        self.integration.diagnostics = empty_diagnostics()
         # Pace date combinations; changing dates should not create a burst of requests.
         previous_request_at = self.last_request_at
         if self.last_request_at is not None:
             remaining = self.request_interval_seconds - (time.monotonic() - self.last_request_at)
             if remaining > 0:
                 time.sleep(remaining)
+        # Replace only the Google HTTP client/cookie jar; pacing and the error
+        # streak belong to the whole pass and must survive session replacement.
+        if self.session_mode == 'fresh' and previous_request_at is not None:
+            self.integration = ConsentAwareFetcher()
+            self.sessions_created += 1
+        self.integration.diagnostics = empty_diagnostics()
         self.last_request_at = time.monotonic()
         start_gap_ms = (round((self.last_request_at - previous_request_at) * 1000)
                         if previous_request_at is not None else None)
@@ -177,6 +199,7 @@ class GoogleFlightsClient:
                            request_interval_seconds=self.request_interval_seconds,
                            start_gap_ms=start_gap_ms)
             details["query_encoding"] = ENCODING_VERSION if self.query_encoding == "browser" else "legacy"
+            details.update(session_mode=self.session_mode, session_index=self.sessions_created)
             self.last_query_diagnostics = details
             return details
 

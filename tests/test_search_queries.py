@@ -232,6 +232,8 @@ class RetryEndpointTest(unittest.TestCase):
         self.assertEqual(start["revision"], "a" * 40)
         self.assertEqual(terminal["diagnostics"]["category"], "http_rate_limited")
         self.assertEqual(terminal["diagnostics"]["http_status"], 429)
+        self.assertEqual(terminal['request_counts'], dict(http_requests=2, flight_get_requests=2,
+                                                        consent_post_requests=0, consent_refetch_requests=0))
         self.assertEqual(start["request_interval_seconds"], 1.5)
         self.assertEqual(terminal["request_interval_seconds"], 1.5)
         self.assertEqual(terminal["diagnostics"]["request_interval_seconds"], 1.5)
@@ -298,3 +300,52 @@ class RetryEndpointTest(unittest.TestCase):
             status, _ = post(address, payload)
             self.assertEqual(status, 400)
             Client.assert_not_called()
+
+    def test_session_modes_validation_progress_and_terminal_request_totals(self):
+        from types import SimpleNamespace
+        payload = dict(password='Victor', origin='LIM', destination='MIL',
+                       target_date=DEPARTURE.isoformat(), date_flex_days=0,
+                       min_duration=12, max_duration=13)
+        consent = '<form action="https://consent.google.com/save"><input name="set_eom" value="true"></form>'
+        result = '<script class="ds:1">data:[],</script>'
+        def network(**kwargs):
+            session = Mock()
+            session.get.side_effect = [SimpleNamespace(status_code=200, text=body)
+                                       for body in (consent, result, result)]
+            session.post.return_value = SimpleNamespace(status_code=200)
+            return session
+        def fetch(query, *, integration):
+            integration.fetch_html(query)
+            return []
+        with endpoint() as address, patch('google_flights.Client', side_effect=network), \
+                patch('google_flights.get_flights', side_effect=fetch), patch('google_flights.time.sleep'), \
+                patch('api.search.sys.stderr', new_callable=io.StringIO):
+            for mode in ('shared', 'fresh'):
+                request = payload if mode == 'shared' else dict(payload, session_mode=mode)
+                status, body = post(address, request)
+                self.assertEqual(status, 200)
+                events = [json.loads(line) for line in body.splitlines()]
+                self.assertEqual(events[0]['session_mode'], mode)
+                self.assertEqual(events[-1]['session_mode'], mode)
+                self.assertEqual(events[-1]['type'], 'done')
+                finished = [e for e in events if e['type']=='progress' and e['status']!='running']
+                self.assertEqual(len(finished), 2)
+                self.assertTrue(all(e['diagnostics']['session_mode']==mode for e in finished))
+                self.assertEqual(events[-1]['request_counts'],
+                                 dict(http_requests=4 if mode=='shared' else 6,
+                                      flight_get_requests=3 if mode=='shared' else 4,
+                                      consent_post_requests=1 if mode=='shared' else 2,
+                                      consent_refetch_requests=1 if mode=='shared' else 2))
+                pair = dict(departure_date=DEPARTURE.isoformat(),
+                            return_date=(DEPARTURE+timedelta(days=12)).isoformat())
+                status, body = post(address, dict(payload, session_mode=mode, retry_queries=[pair]))
+                terminal = json.loads(body.splitlines()[-1])
+                self.assertEqual(terminal['session_mode'], mode)
+                self.assertEqual(terminal['completed'], 1)
+                self.assertEqual(terminal['request_counts']['http_requests'], 3)
+            with patch('api.search.GoogleFlightsClient') as client:
+                for invalid in (None, True, [], {}, 4, 'Fresh', 'rotate'):
+                    status, body = post(address, dict(payload, session_mode=invalid))
+                    self.assertEqual(status, 400)
+                    self.assertIn('session_mode', json.loads(body)['error'])
+                client.assert_not_called()

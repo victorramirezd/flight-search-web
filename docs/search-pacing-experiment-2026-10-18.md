@@ -29,10 +29,21 @@ consent failures, parser errors, stream interruptions, or platform timeouts.
 
 ## Interpretation and default
 
-Four seconds performed best in this small sample and is now the default for both
-website/API and CLI. The API accepts explicit intervals from 1.5 to 15 seconds for
-further controlled comparisons. Four seconds makes searches take longer; it is an
-operational choice based on these observations, not a guarantee against failures.
+Four seconds performed best in the initial comparison, so it was briefly deployed
+as the default in revision `1c26f92644df49deaf7bfdab629638c524a3407b`. A follow-up
+production verification immediately returned **two errors in two queries**:
+
+| Departure | Return | Outcome | Measured start gap |
+| --- | --- | --- | --- |
+| 10 December 2026 | 24 December 2026 | HTTP 200 generic upstream error | First query: no preceding request |
+| 10 December 2026 | 25 December 2026 | HTTP 200 generic upstream error | 4000 ms |
+
+These pairs had succeeded in both four-second comparison passes. The follow-up
+was outside the balanced comparison and should be reported separately, not treated
+as a third identical pass. It demonstrates that the initially clean four-second
+result is not reliable enough to justify making every search slower. The original
+**1.5-second default is restored** for website/API and CLI. Explicit API intervals
+from 1.5 to 15 seconds remain available for controlled testing.
 
 The eight-second runs had more failures than the faster runs, and one failed on its
 first query after a cooldown. The evidence does not establish that Google's failures

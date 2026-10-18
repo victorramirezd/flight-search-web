@@ -122,7 +122,7 @@ all per-departure `failed_queries` as JSON, alongside search status and message.
   format. A generic Google query error marks that date combination as failed and
   the search moves to the next combination without retrying the failed one. Three
   consecutive query errors stop the search; HTTP/consent/parse failures stop immediately.
-  Requests are paced at least 4 seconds apart by default. Existing fares, including partial
+  Requests are paced at least 1.5 seconds apart by default. Existing fares, including partial
   results for the current departure, are retained and marked incomplete when stopped.
   An empty result means no matching priced results were returned, not that no flights exist.
   A stream interrupted before its `done` event is shown as incomplete.
@@ -197,7 +197,8 @@ excludes the search password, cookies, consent tokens, HTTP headers, and raw HTM
 ## Comparing production request pacing
 
 `POST /api/search` accepts optional `request_interval_seconds` between 1.5 and 15.
-The default is 4 seconds, chosen after the [production comparison](docs/search-pacing-experiment-2026-10-18.md).
+The default remains 1.5 seconds: the [production comparison](docs/search-pacing-experiment-2026-10-18.md)
+did not demonstrate a reliable improvement from longer waits.
 This is the minimum gap between starts of Google date-pair requests, not an extra
 pause after a response. The first query starts immediately. The selected interval
 and observed start gap are recorded in diagnostics; filters, session reuse, retry

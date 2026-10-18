@@ -19,7 +19,7 @@ from selectolax.lexbor import LexborHTMLParser
 
 from flight_search import ApiError, ProviderUnavailableError, location_airport_codes
 
-REQUEST_INTERVAL_SECONDS = 4.0
+REQUEST_INTERVAL_SECONDS = 1.5
 MAX_CONSECUTIVE_QUERY_ERRORS = 3
 
 

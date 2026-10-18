@@ -141,13 +141,13 @@ class GoogleFlightsTest(unittest.TestCase):
         self.assertEqual(fetch.call_count, 2)
 
     @patch("google_flights.get_flights", return_value=[])
-    @patch("google_flights.time.monotonic", side_effect=[100, 100.25, 104.0])
+    @patch("google_flights.time.monotonic", side_effect=[100, 100.25, 101.5])
     @patch("google_flights.time.sleep")
     def test_requests_are_paced(self, sleep, clock, fetch):
         client = GoogleFlightsClient()
         self.search(client)
         self.search(client, return_date=DEPARTURE + timedelta(days=7))
-        sleep.assert_called_once_with(3.75)
+        sleep.assert_called_once_with(1.25)
 
     @patch("google_flights.get_flights", return_value=[])
     def test_configured_intervals_pace_request_starts_and_record_actual_gap(self, fetch):
@@ -182,7 +182,7 @@ class GoogleFlightsTest(unittest.TestCase):
                 with self.subTest(value=value), self.assertRaisesRegex(ValueError, "between 1.5 and 15"):
                     GoogleFlightsClient(request_interval_seconds=value)
             fetcher.assert_not_called()
-        self.assertEqual(GoogleFlightsClient().request_interval_seconds, 4.0)
+        self.assertEqual(GoogleFlightsClient().request_interval_seconds, 1.5)
         self.assertEqual(GoogleFlightsClient(request_interval_seconds=15).request_interval_seconds, 15)
 
     @patch("google_flights.time.sleep")

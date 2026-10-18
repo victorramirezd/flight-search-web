@@ -4,6 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
   "requests",
+  "fast-flights @ git+https://github.com/AWeirdDev/flights.git@7c105db4ed5f73fbadbf6b0e9f6bdfd71f352d97",
+  "primp==2.0.1",
+  "typing_extensions>=4.12",
 ]
 
 [tool.vercel]

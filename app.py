@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -11,6 +11,7 @@ STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/airports.js": ("airports.js", "text/javascript; charset=utf-8"),
+    "/search-ui.js": ("search-ui.js", "text/javascript; charset=utf-8"),
     "/logo.png": ("logo.png", "image/png"),
     "/data/airports.json": ("data/airports.json", "application/json; charset=utf-8"),
 }
@@ -45,3 +46,19 @@ class handler(SearchHandler):
             return
 
         super().do_OPTIONS()
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the flight search website locally")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
+    print(f"Flight search: http://127.0.0.1:{args.port}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()

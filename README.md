@@ -1,174 +1,168 @@
-# Flight Search Tool
+# Flight Search Tool — Google Flights experiment
 
-This repository contains a Python flight search script and a Vercel-ready web UI using the **Duffel Flight Offers API**.
+The `codex/google-flights-search` branch uses **Google Flights via fast-flights 3.1.0**
+instead of Duffel for both the website and CLI. No Duffel token is needed for searches.
+The consent-aware fetcher rejects optional cookies using Google's returned form and
+reuses the same HTTP session, following the local `flight-search` skill.
 
-## Features
+## Local setup
 
-- Flexible departure window around a target date
-- Flexible round-trip duration range or one-way mode
-- Best price summary for each departure date
-- Airline, airport route, flight code, layover, and total duration details
-- Maximum layover filtering, defaulting to 2 layovers per slice
-- CSV output from the CLI
-- Password-protected web search endpoint
-
-## Local Setup
-
-Create and activate a virtual environment:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-Install dependencies:
-
-```bash
-pip install requests
-```
-
-Set your Duffel access token:
-
-```bash
-export DUFFEL_ACCESS_TOKEN="..."
-```
-
-## CLI Usage
-
-```bash
-python3 flight_search.py \
-  --origin MIL \
-  --destination LIM \
-  --target-date 2026-08-10 \
-  --date-flex-days 4 \
-  --min-duration 13 \
-  --max-duration 17
-```
-
-## Website
-
-The web app is made of:
-
-- `index.html`: the browser UI
-- `api/search.py`: the Vercel serverless search endpoint
-- `flight_search.py`: shared Duffel search logic
-- `scripts/enrich_airport_coordinates.py`: enriches the airport option list with coordinates from OurAirports
-- `requirements.txt`: Python dependencies for Vercel
-
-The web search password is currently hardcoded in `api/search.py` as:
-
-```python
-SEARCH_PASSWORD = "victor"
-```
-
-The check is case-insensitive, so `Victor` works in the web form.
-
-Set the Duffel token in Vercel:
-
-```bash
-vercel env add DUFFEL_ACCESS_TOKEN
-```
-
-Deploy preview:
-
-```bash
-vercel
-```
-
-Deploy production:
-
-```bash
-vercel --prod
-```
-
-## Output Columns
-
-- `origin`
-- `destination`
-- `departure_date`
-- `best_return_date` for round trips
-- `best_price`
-- `currency`
-- `airlines`
-- `airports`
-- `flight_codes`
-- `flight_segments`
-- `layovers`
-- `total_duration`
-- `mode`
-- `best_offer_id`
-
-## Notes
-
-- Duffel test tokens start with `duffel_test_`; test mode can return unrealistic schedules, prices, and flight numbers.
-- The script defaults to `--max-connections-per-slice 2`, excluding offers with more than two layovers in any outbound or return slice.
-- Use `--min-connections-per-slice 1` to exclude direct-looking offers for routes where direct flights should not exist.
-- Keep `.env` and `.venv/` out of Git. They are ignored by `.gitignore`.
-
-## Location search
-
-The web form ranks city, airport-name and IATA matches, with accent normalization and
-limited typo suggestions when there are no direct matches. Choose a suggestion using
-the mouse or Arrow Up/Down and Enter; Escape closes the list. Selected locations use
-compact labels such as `Palermo (PMO)`. Exact known IATA codes and unambiguous names
-also resolve on submission. Ambiguous names require a selection.
-
-Only catalog codes are submitted to Duffel. The catalog is not a guarantee of scheduled
-service or Duffel coverage. The Search status column distinguishes no matching offers
-from failed date searches, and flags incomplete prices when some date searches fail.
-
-Run regression checks with Python 3.12+ and Node.js:
+Use Python 3.12+ and Git:
 
 ```sh
-python -m unittest discover -s tests
+python3.12 -m venv .venv-google
+.venv-google/bin/python -m pip install -r requirements.txt
+.venv-google/bin/python app.py
+```
+
+Open <http://127.0.0.1:8000>. The existing web password is `victor` (case-insensitive).
+Use `--port 8001` with `app.py` if needed. This local server binds to localhost.
+
+The dependency files pin fast-flights to upstream commit
+[`7c105db`](https://github.com/AWeirdDev/flights/commit/7c105db4ed5f73fbadbf6b0e9f6bdfd71f352d97),
+the version installed for the skill, and primp to the tested Chrome-145-capable version.
+`typing_extensions` is included explicitly because upstream omits it from its dependencies.
+
+## Try a small search first
+
+Choose **cities or individual airports** (for example, MIL/LON or FCO/LHR), a future departure date,
+and set date flex days to `0`. Select one-way for the first test. Prices use EUR and
+all displayed departure/arrival times are local to the respective airport.
+
+```sh
+.venv-google/bin/python flight_search.py \
+  --origin FCO --destination LHR \
+  --target-date 2026-11-10 --date-flex-days 0 --one-way \
+  --max-connections-per-slice 0 \
+  --output-csv work/flights.csv
+```
+
+Create the output directory first if exporting CSV. Replace the example date if it
+is no longer in the future. The whole flexible departure window must be in the future.
+
+For round-trip comparisons, omit `--one-way` and add, for example,
+`--min-duration 7 --max-duration 9`. The tool searches each departure/date-duration
+combination sequentially and streams the cheapest matching result per departure date.
+Prices cover the configured party of 1–9 adults in economy.
+
+## What this experiment can show
+
+- Flexible departure windows, one-way and round-trip queries, and adult counts
+- Best returned priced result per departure date, filtered for outbound layovers
+- Airlines, actual airport routes, airport-local segment times, outbound duration
+- Google Flights links with the searched route, dates, passengers, EUR and max stops
+- Search timestamps, status, and CSV exports including failure messages
+- City/airport autocomplete with accent normalization, typo suggestions, and keyboard navigation
+- Self-transfer/separate-ticket exclusion enabled by default; switch it off to include them
+- Departure and return-window bars on a shared date scale, with hatched overlap
+- A readable streaming table, loading spinner and per-query progress slots
+- Repeated user-triggered retry passes for remaining failures, preserving earlier fares
+- Departure × return price heatmap with per-pair fares, lowest-price highlights and itinerary details
+- Copy table as HTML/TSV for pasting into Excel, with plain-text/manual fallbacks
+
+The default excludes self-transfers and separate tickets. To include them in CLI searches,
+add `--include-self-transfers`.
+
+## Price calendar and date windows
+
+Both window bars share the earliest departure-to-latest-return date scale. Gold marks
+the departure window, green the return window, and hatching marks their actual overlap.
+The ruler covers inclusive calendar days and handles windows crossing months/years.
+
+The live calendar has departure dates down the rows and return dates across columns.
+Each valid date pair gets its own observed EUR fare, not only the departure's cheapest
+summary. Lower prices are green, higher prices warm-colored, and all tied lowest fares
+have a “Best” label and outline. Cells distinguish pending, searching, failed, no matching
+priced results, and combinations outside the configured trip duration. Selecting a cell
+shows its itinerary, observation time and Google Flights link. One-way searches use one
+fare column. Earlier successful fares remain visible during recovery.
+
+## Streaming endpoint
+
+`POST /api/search` accepts `exclude_self_transfers` (default `true`) and optional
+`retry_queries`: a non-empty list of `{ "departure_date": "YYYY-MM-DD", "return_date": "YYYY-MM-DD" }`
+pairs (`null` return date for one-way). Pairs must be unique members of the submitted
+search's original date grid. Route, passengers and filters are supplied with every request;
+the browser retains the original settings across manual recovery passes.
+
+The NDJSON `start` event includes the ordered `queries` plan, `total` and `is_retry`.
+Each query emits `progress` when `running` and when `ok`, `no_offers` or `error`, with
+its `query_id`, dates, message, completed count and total. Successful progress events
+also contain an `offer` summary for that exact date pair (price, EUR, route, times,
+search timestamp and Google Flights URL); other outcomes contain `offer: null`. Existing `row` events carry
+the departure summary. Terminal `done`/`error` events include `failed_queries`,
+`pending_queries`, `completed` and `total`. A generic `done` event does not establish
+availability; failed or unattempted combinations remain explicit. CSV exports include
+all per-departure `failed_queries` as JSON, alongside search status and message.
+
+## Limits of this provider
+
+- **Round trips:** the parser returns outbound itinerary details with indicative
+  round-trip fares. It does not expose a selected return itinerary. Return dates in
+  the table are the dates queried; select and confirm return flights on Google Flights.
+  Maximum stops are requested for both directions and checked on outbound results.
+  Minimum stops are checked on the outbound only.
+- **City codes:** city choices such as MIL/LON use Google's native metropolitan query,
+  with one request per date combination. Returned airport endpoints must belong to the
+  selected catalog city. This catalog is an identity reference, not a guarantee of service.
+- **Self-transfers:** the exclusion setting is passed to Google's native filter and the
+  result link. The scraper has no per-result transfer/protection flag, so the app does
+  not classify tickets from airline counts. Filtering does not fix provider errors.
+- **Flight numbers and booking IDs:** the parser does not provide them. Legacy CSV
+  fields `flight_codes` and `best_offer_id` remain `N/A`; no values are invented.
+  The legacy `airline_url` field now points to the Google Flights search, rather than
+  a specific itinerary or airline booking page.
+- **Duration:** outbound duration includes flight time and same-airport connections.
+  It is unavailable for airport changes because timezone-safe transfer times are not supplied.
+- **Availability:** fares can change. Google can block requests or change its response
+  format. A generic Google query error marks that date combination as failed and
+  the search moves to the next combination without retrying the failed one. Three
+  consecutive query errors stop the search; HTTP/consent/parse failures stop immediately.
+  Requests are paced at least 1.5 seconds apart. Existing fares, including partial
+  results for the current departure, are retained and marked incomplete when stopped.
+  An empty result means no matching priced results were returned, not that no flights exist.
+  A stream interrupted before its `done` event is shown as incomplete.
+  After failures, “Retry failed dates” remains available for additional manual passes
+  using a fresh session and the original submitted settings. Waiting between passes
+  may help; the UI shows when the last pass finished. Successful queries are not rerun.
+  Retries are user-triggered, with one active pass at a time.
+  Recovery never erases a cheaper earlier fare. Unattempted queries remain pending;
+  retrying failures after an early stop does not resume unattempted combinations.
+- **Hosting:** local connectivity does not establish that Google's scraper will work
+  from a Vercel data-center IP. Large flexible windows can also exceed function time limits.
+  This branch has not been deployed or tested on Vercel.
+
+## Files
+
+- `app.py`: Vercel entrypoint and local HTTP server
+- `api/search.py`: password-protected NDJSON streaming endpoint
+- `flight_search.py`: configuration, summary formatting, flexible-date iteration and CLI
+- `google_flights.py`: consent handling, query construction and result adaptation
+- `index.html`, `airports.js`, `search-ui.js`: browser UI, autocomplete, ledger, streaming and clipboard helpers
+- `requirements.txt`, `pyproject.toml`: deployment/runtime dependencies
+
+The airport catalog and its existing Duffel reference audit remain in the repository.
+That historical identity audit does **not** establish Google Flights coverage. See
+[the catalog validation notes](docs/airport-catalog-validation.md).
+`scripts/validate_duffel_catalog.py` remains a separate reference-maintenance utility
+that needs a Duffel token; normal flight searches do not call it.
+
+## Verification
+
+```sh
+.venv-google/bin/python -m unittest discover -s tests
 node tests/airports.test.cjs
+node tests/stream.test.cjs
+node tests/search-ui.test.cjs
+.venv-google/bin/python -m pip check
 ```
 
-Backend tests use a fake provider and do not call Duffel.
-
-## Validate the full catalog against Duffel
-
-`scripts/validate_duffel_catalog.py` downloads every page of Duffel v2's airport
-and city reference lists, then compares every local entry by IATA code, location
-type and country. It does not create flight offer requests or bookings.
-
-Make `DUFFEL_ACCESS_TOKEN` available in your local environment, then run:
-
-```sh
-python scripts/validate_duffel_catalog.py --output work/duffel-catalog
-```
-
-Keep the token out of shell history, source control and reports. The script does
-not automatically load `.env` files. It needs the existing `requests` dependency.
-
-The output contains a complete reference snapshot, per-entry JSON/CSV comparisons,
-a summary with retrieval time and hashes, and a proposed corrected catalog. The
-original catalog is unchanged unless you explicitly add `--write-catalog`.
-A failed download, repeated cursor or missing pagination metadata stops validation
-before it writes a report or changes the catalog.
-
-Confirmed entries use Duffel's airport/city identities and metropolitan membership.
-The validator also reads airports embedded in city records, with top-level airport
-records preferred over duplicate membership aliases. Codes defined only as cities
-are labelled as cities instead of individual airports.
-
-Local coordinates are retained because Duffel's reference geography contains some
-large discrepancies. Differences over 100 km are flagged, with the local name and
-city retained as well. If local coordinates are missing, valid Duffel coordinates
-are used as a fallback. Country conflicts are accepted only when the exact code and
-coordinates within 5 km identify the same airport; the local country is retained
-and Duffel's differing country is explicitly recorded. Distant country/code
-collisions and codes absent from both reference lists are excluded and reported.
-
-Alternate names are retained as search aliases for matching identities, but never
-transferred from an old airport label to a city or across a large coordinate
-conflict. Review exclusions and metadata warnings before applying a catalog.
-
-Validation confirms reference identity, not scheduled service, flight availability
-or bookability. Repeat periodically because provider reference data changes.
-
-The current validation evidence and correction decisions are documented in
-`docs/airport-catalog-validation.md`. The per-entry comparison is in
-`data/airport-validation.csv`, and its summary/hashes are in
-`data/airport-validation.json`. Re-running the older OurAirports coordinate
-utility on the validated catalog is disabled; refresh via this validator instead.
+Tests cover consent rejection/session reuse, one-way and round-trip queries, adult
+counts, EUR, stop filtering before result limits, local times and duration, missing
+fares, blocked-search termination, CSV output, request validation, streaming errors,
+city endpoint membership, transfer-filter serialization, targeted retries, progress
+counts, repeated recovery passes, shared-scale/overlap geometry, per-pair calendar
+prices and colors, HTML/TSV clipboard output, and the existing airport catalog.
+Tests use fake provider responses; they do not
+establish current flight availability. Run a small real search separately to check
+Google connectivity.

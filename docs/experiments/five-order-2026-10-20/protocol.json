@@ -1,0 +1,178 @@
+{
+  "protocol": "five_order_v1",
+  "started_at": "2026-10-20T18:26:33.059539+00:00",
+  "state": "interrupted",
+  "settings": {
+    "origin": "LIM",
+    "destination": "MIL",
+    "target_date": "2026-12-12",
+    "date_flex_days": 2,
+    "min_duration": 14,
+    "max_duration": 18,
+    "one_way": false,
+    "adults": 1,
+    "min_connections_per_slice": 0,
+    "max_connections_per_slice": 2,
+    "max_results_per_query": 20,
+    "exclude_self_transfers": true,
+    "query_encoding": "browser",
+    "session_mode": "shared",
+    "request_interval_seconds": 1.5
+  },
+  "base_url": "https://www.travelling-alpaca.com",
+  "expected_region": "iad1",
+  "expected_revision": "17425f94bb40892c47a33b467ad45b3ec9cc3c1e",
+  "cooldowns": [
+    {
+      "started_at": "2026-10-20T18:27:10.705733+00:00",
+      "planned_seconds": 300,
+      "after_ordering": 1,
+      "remaining_seconds": 0,
+      "finished_at": "2026-10-20T18:32:10.712400+00:00"
+    },
+    {
+      "started_at": "2026-10-20T18:32:48.118212+00:00",
+      "planned_seconds": 300,
+      "after_ordering": 2,
+      "remaining_seconds": 0,
+      "finished_at": "2026-10-20T18:37:48.131477+00:00"
+    },
+    {
+      "started_at": "2026-10-20T18:38:25.551717+00:00",
+      "planned_seconds": 300,
+      "after_ordering": 3,
+      "remaining_seconds": 0,
+      "finished_at": "2026-10-20T18:43:25.598143+00:00"
+    }
+  ],
+  "completed_orderings": [
+    1,
+    2,
+    3
+  ],
+  "stop_reason": "The controlling process ended during ordering 4. No terminal event or final outcome was received. No automatic resume; the unplanned gap invalidates a five-minute continuation.",
+  "reconciled_at": "2026-10-20T20:15:18.943911+00:00",
+  "orderings": [
+    {
+      "number": 1,
+      "order": "ABCDE",
+      "departure_order": [
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-12",
+        "2026-12-13",
+        "2026-12-14"
+      ],
+      "state": "complete",
+      "started_at": "2026-10-20T18:26:33.060814+00:00",
+      "metadata": {
+        "request_id": "3140d97f-41ef-411f-b726-d5824dcc5f29",
+        "region": "iad1",
+        "revision": "17425f94bb40892c47a33b467ad45b3ec9cc3c1e",
+        "session_mode": "shared",
+        "query_encoding": "browser",
+        "request_interval_seconds": 1.5
+      },
+      "terminal": "done",
+      "request_counts": {
+        "http_requests": 25,
+        "flight_get_requests": 25,
+        "consent_post_requests": 0,
+        "consent_refetch_requests": 0
+      },
+      "finished_at": "2026-10-20T18:27:10.294103+00:00"
+    },
+    {
+      "number": 2,
+      "order": "BCDEA",
+      "departure_order": [
+        "2026-12-11",
+        "2026-12-12",
+        "2026-12-13",
+        "2026-12-14",
+        "2026-12-10"
+      ],
+      "state": "complete",
+      "started_at": "2026-10-20T18:32:10.717215+00:00",
+      "metadata": {
+        "request_id": "bcf563d3-2623-4a6b-82c6-49b5b9327982",
+        "region": "iad1",
+        "revision": "17425f94bb40892c47a33b467ad45b3ec9cc3c1e",
+        "session_mode": "shared",
+        "query_encoding": "browser",
+        "request_interval_seconds": 1.5
+      },
+      "terminal": "done",
+      "request_counts": {
+        "http_requests": 25,
+        "flight_get_requests": 25,
+        "consent_post_requests": 0,
+        "consent_refetch_requests": 0
+      },
+      "finished_at": "2026-10-20T18:32:47.879509+00:00"
+    },
+    {
+      "number": 3,
+      "order": "CDEAB",
+      "departure_order": [
+        "2026-12-12",
+        "2026-12-13",
+        "2026-12-14",
+        "2026-12-10",
+        "2026-12-11"
+      ],
+      "state": "complete",
+      "started_at": "2026-10-20T18:37:48.134933+00:00",
+      "metadata": {
+        "request_id": "8e7c736a-99c1-45de-b3f2-5f7ae5eeb632",
+        "region": "iad1",
+        "revision": "17425f94bb40892c47a33b467ad45b3ec9cc3c1e",
+        "session_mode": "shared",
+        "query_encoding": "browser",
+        "request_interval_seconds": 1.5
+      },
+      "terminal": "done",
+      "request_counts": {
+        "http_requests": 25,
+        "flight_get_requests": 25,
+        "consent_post_requests": 0,
+        "consent_refetch_requests": 0
+      },
+      "finished_at": "2026-10-20T18:38:25.309684+00:00"
+    },
+    {
+      "number": 4,
+      "order": "DEABC",
+      "departure_order": [
+        "2026-12-13",
+        "2026-12-14",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-12"
+      ],
+      "state": "interrupted",
+      "started_at": "2026-10-20T18:43:25.603682+00:00",
+      "metadata": {
+        "request_id": "4fd1671c-8637-475f-b3b3-936f48c2eee2",
+        "region": "iad1",
+        "revision": "17425f94bb40892c47a33b467ad45b3ec9cc3c1e",
+        "session_mode": "shared",
+        "query_encoding": "browser",
+        "request_interval_seconds": 1.5
+      },
+      "last_observed_at": "2026-10-20T18:43:55.964501+00:00"
+    },
+    {
+      "number": 5,
+      "order": "EABCD",
+      "departure_order": [
+        "2026-12-14",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-12",
+        "2026-12-13"
+      ],
+      "state": "pending"
+    }
+  ]
+}

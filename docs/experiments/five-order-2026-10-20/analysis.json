@@ -1,0 +1,64 @@
+{
+  "summary": {
+    "attempted": 95,
+    "priced": 85,
+    "valid_unpriced": 0,
+    "errors": 10,
+    "interrupted": 1,
+    "pending": 29
+  },
+  "by_group_position": [
+    {
+      "position": 1,
+      "attempted": 20,
+      "priced": 15,
+      "valid_unpriced": 0,
+      "errors": 5,
+      "interrupted": 0,
+      "pending": 5
+    },
+    {
+      "position": 2,
+      "attempted": 20,
+      "priced": 19,
+      "valid_unpriced": 0,
+      "errors": 1,
+      "interrupted": 0,
+      "pending": 5
+    },
+    {
+      "position": 3,
+      "attempted": 20,
+      "priced": 19,
+      "valid_unpriced": 0,
+      "errors": 1,
+      "interrupted": 0,
+      "pending": 5
+    },
+    {
+      "position": 4,
+      "attempted": 20,
+      "priced": 17,
+      "valid_unpriced": 0,
+      "errors": 3,
+      "interrupted": 0,
+      "pending": 5
+    },
+    {
+      "position": 5,
+      "attempted": 15,
+      "priced": 15,
+      "valid_unpriced": 0,
+      "errors": 0,
+      "interrupted": 1,
+      "pending": 9
+    }
+  ],
+  "paired_early_late": {
+    "pairs": 10,
+    "early_priced": 8,
+    "late_priced": 10,
+    "lost": 0,
+    "gained": 2
+  }
+}

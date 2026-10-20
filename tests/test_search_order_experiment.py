@@ -195,3 +195,38 @@ class OrderExperimentTest(unittest.TestCase):
                 cooldown(manifest,Path(directory),300)
             self.assertIn('finished_at',manifest['cooldowns'][0])
             self.assertEqual(manifest['cooldowns'][0]['remaining_seconds'],300)
+
+
+    def test_runner_signal_cancellation_persists_unknown_query_and_restores_handlers(self):
+        import signal
+        from scripts.search_order_experiment import run_five_order
+        b=batch()
+        def events(**kwargs):
+            yield json.dumps(start(b)).encode()
+            yield json.dumps(dict(type='progress',**pair(b['queries'][0]),status='running')).encode()
+            raise KeyboardInterrupt
+        response=Mock()
+        response.iter_lines.side_effect=events
+        context=Mock()
+        context.__enter__=Mock(return_value=response)
+        context.__exit__=Mock(return_value=False)
+        with TemporaryDirectory() as directory, patch('scripts.search_order_experiment.requests.post',return_value=context) as post_request, \
+                patch('scripts.search_order_experiment.signal.signal',return_value=signal.SIG_DFL) as handlers, \
+                patch('scripts.search_order_experiment.render_report'),patch('builtins.print'):
+            args=SimpleNamespace(expected_revision=REVISION,expected_region='iad1',cooldown_seconds=None,
+                                 encodings='browser',session_modes='shared',intervals='4,1.5,8,8,1.5,4',
+                                 output_dir=directory,base_url='https://example.invalid')
+            self.assertEqual(run_five_order(args,'not-saved-secret'),2)
+            post_request.assert_called_once()
+            saved=(Path(directory)/'comparison.json').read_text()
+            manifest=json.loads(saved)
+            self.assertEqual(manifest['state'],'cancelled')
+            all_rows=[r for group in manifest['orderings'] for r in group['queries']]
+            self.assertEqual(counts(all_rows)['attempted'],0)
+            self.assertEqual(counts(all_rows)['interrupted'],1)
+            self.assertEqual(counts(all_rows)['pending'],124)
+            self.assertNotIn('not-saved-secret',saved)
+            if hasattr(signal,'SIGHUP'):
+                registrations=[call.args[0] for call in handlers.call_args_list[:3]]
+                self.assertIn(signal.SIGHUP,registrations)
+                self.assertEqual(handlers.call_count,6)

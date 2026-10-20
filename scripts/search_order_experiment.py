@@ -183,6 +183,7 @@ def render_report(manifest, output):
     import matplotlib.pyplot as plt
 
     batches = manifest['orderings']
+    title_suffix = '' if manifest['state'] == 'complete' else ' (partial run)'
     rows = [row for batch in batches for row in batch['queries']]
     summary = counts(rows)
     table = ['| Ordering | Planned | Attempted | Priced | Valid unpriced | Errors | Interrupted | Pending | Priced rate |',
@@ -227,7 +228,7 @@ def render_report(manifest, output):
                 at=(batch['number']-1)*25+row['position']
                 axis.axvspan(at-.5, at+.5, color='#dddddd', alpha=.45)
     axis.set(xlim=(1,125), ylim=(-.03,1.03), xlabel='Scheduled date-pair check (grey = no completed outcome)',
-             ylabel='Priced results / last 10 completed checks', title='Rolling priced-response rate — five rotated orderings')
+             ylabel='Priced results / last 10 completed checks', title='Rolling priced-response rate — five rotated orderings' + title_suffix)
     axis.set_yticks([0,.25,.5,.75,1], ['0%','25%','50%','75%','100%'])
     axis.grid(axis='y', alpha=.2)
     if manifest['cooldowns']:
@@ -243,7 +244,7 @@ def render_report(manifest, output):
         label = f"{c['priced']}/{c['attempted']}" if c['attempted'] else 'Not observed'
         axis.text(c['position'], value+.025, label, ha='center')
     axis.set(ylim=(0,1.15), xticks=range(1,6), xlabel='Group position within each ordering (five date pairs per group)',
-             ylabel='Priced results / attempted pairs', title='Response rate by group position — date groups rotate')
+             ylabel='Priced results / attempted pairs', title='Response rate by group position — date groups rotate' + title_suffix)
     axis.set_yticks([0,.25,.5,.75,1], ['0%','25%','50%','75%','100%'])
     axis.grid(axis='y', alpha=.2)
     figure.savefig(output/'group-position-success.svg')
@@ -296,7 +297,10 @@ def run_five_order(args, password):
     old_handlers={}
     def cancel(signum, frame):
         raise KeyboardInterrupt
-    for sig in (signal.SIGINT, signal.SIGTERM):
+    shutdown_signals = [signal.SIGINT, signal.SIGTERM]
+    if hasattr(signal, 'SIGHUP'):
+        shutdown_signals.append(signal.SIGHUP)
+    for sig in shutdown_signals:
         old_handlers[sig]=signal.signal(sig,cancel)
     try:
         for batch in batches:

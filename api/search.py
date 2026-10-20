@@ -22,6 +22,23 @@ from google_flights import (GoogleFlightsClient, REQUEST_INTERVAL_SECONDS,
 SEARCH_PASSWORD = "victor"
 
 
+def experiment_plan(value, plan):
+    """An explicit, bounded override; ordinary searches keep their original plan."""
+    if not isinstance(value, dict) or set(value) != {'departure_order', 'continue_generic_errors'}:
+        raise ValueError('experiment requires departure_order and continue_generic_errors.')
+    order = value['departure_order']
+    if not isinstance(value['continue_generic_errors'], bool):
+        raise ValueError('continue_generic_errors must be a boolean.')
+    if not 1 <= len(plan) <= 25:
+        raise ValueError('Experiments are limited to 25 date pairs per ordering.')
+    departures = {q.departure_date.isoformat() for q in plan}
+    if (not isinstance(order, list) or any(not isinstance(day, str) for day in order)
+            or len(order) != len(departures) or set(order) != departures):
+        raise ValueError('departure_order must be an exact permutation of the selected departures.')
+    rank = {day: index for index, day in enumerate(order)}
+    return sorted(plan, key=lambda q: (rank[q.departure_date.isoformat()], q.return_date or q.departure_date))
+
+
 def deployment_metadata():
     """Expose only deployment identifiers, never arbitrary environment values."""
     def safe(value, limit):
@@ -104,6 +121,10 @@ class handler(BaseHTTPRequestHandler):
             )
             plan = (validate_retry_queries(data["retry_queries"], config)
                     if "retry_queries" in data else search_queries(config))
+            experiment = None
+            if 'experiment' in data:
+                plan = experiment_plan(data['experiment'], plan)
+                experiment = data['experiment']
         except (TypeError, ValueError) as err:
             json_response(self, 400, {"error": str(err)})
             return
@@ -117,6 +138,8 @@ class handler(BaseHTTPRequestHandler):
         metadata = {"request_id": request_id, **deployment_metadata(),
                     "request_interval_seconds": request_interval_seconds,
                     "query_encoding": query_encoding, "session_mode": session_mode}
+        if experiment is not None:
+            metadata['experiment'] = experiment
         rows = []
         ledger = {q.payload()["query_id"]: {**q.payload(), "status": "pending", "message": ""}
                   for q in plan}
@@ -167,6 +190,7 @@ class handler(BaseHTTPRequestHandler):
                 request_interval_seconds=request_interval_seconds,
                 query_encoding=query_encoding,
                 session_mode=session_mode,
+                continue_generic_errors=bool(experiment and experiment['continue_generic_errors']),
             )
             for row in iter_search_rows(client, config, queries=plan, on_progress=report_progress):
                 rows.append(row)

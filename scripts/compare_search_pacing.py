@@ -14,18 +14,24 @@ import requests
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--five-order', action='store_true', help='Run the fixed 125-check, five-order deterioration experiment.')
     parser.add_argument('--base-url', default='https://www.travelling-alpaca.com')
     parser.add_argument('--intervals', default='4,1.5,8,8,1.5,4')
     parser.add_argument('--encodings', default='browser', help='One mode for all passes or comma-separated browser/legacy modes matching intervals.')
     parser.add_argument('--session-modes', default='shared', help='One mode or comma-separated shared/fresh modes matching intervals.')
     parser.add_argument('--expected-region', help='Abort if the API executes in another region.')
     parser.add_argument('--expected-revision', help='Abort if the deployment revision changes.')
-    parser.add_argument('--cooldown-seconds', type=float, default=30)
-    parser.add_argument('--output-dir', default='work/diagnostics/pacing-comparison')
+    parser.add_argument('--cooldown-seconds', type=float, default=None)
+    parser.add_argument('--output-dir', default=None)
     args = parser.parse_args()
     password = os.environ.get('FLIGHT_SEARCH_PASSWORD')
     if not password:
         parser.error('Set FLIGHT_SEARCH_PASSWORD in the environment.')
+    if args.five_order:
+        from search_order_experiment import run_five_order
+        return run_five_order(args, password)
+    args.cooldown_seconds = 30 if args.cooldown_seconds is None else args.cooldown_seconds
+    args.output_dir = args.output_dir or 'work/diagnostics/pacing-comparison'
     intervals = [float(value) for value in args.intervals.split(',')]
     if not intervals or any(not 1.5 <= value <= 15 for value in intervals):
         parser.error('Intervals must be between 1.5 and 15 seconds.')

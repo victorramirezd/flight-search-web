@@ -141,7 +141,12 @@ class GoogleFlightsClient:
     def __init__(self, *, min_connections: int = 0, max_connections: Optional[int] = 2,
                  exclude_self_transfers: bool = True,
                  request_interval_seconds: float = REQUEST_INTERVAL_SECONDS,
-                 query_encoding: str = "browser", session_mode: str = "shared"):
+                 query_encoding: str = "browser", session_mode: str = "shared",
+                 continue_generic_errors: bool = False):
+        if not isinstance(continue_generic_errors, bool):
+            raise ValueError('continue_generic_errors must be a boolean')
+        self.continue_generic_errors = continue_generic_errors
+        self.queries_started = 0
         if not isinstance(query_encoding, str) or query_encoding not in {"browser", "legacy"}:
             raise ValueError("query_encoding must be browser or legacy")
         self.query_encoding = query_encoding
@@ -161,6 +166,8 @@ class GoogleFlightsClient:
         self, *, origin: str, destination: str, departure_date: date,
         return_date: Optional[date], adults: int, max_results: int,
     ) -> list[dict]:
+        if self.continue_generic_errors and self.queries_started >= 25:
+            raise ProviderUnavailableError('Experiment stopped at its 25-query limit; availability is unknown.')
         flights = [FlightQuery(date=departure_date.isoformat(), from_airport=origin,
                                to_airport=destination)]
         if return_date:
@@ -191,6 +198,8 @@ class GoogleFlightsClient:
         start_gap_ms = (round((self.last_request_at - previous_request_at) * 1000)
                         if previous_request_at is not None else None)
         started = time.perf_counter()
+        query_started_at = datetime.now(timezone.utc).isoformat()
+        self.queries_started += 1
 
         def diagnostics(category, exception=None):
             details = dict(self.integration.diagnostics)
@@ -200,6 +209,8 @@ class GoogleFlightsClient:
                            start_gap_ms=start_gap_ms)
             details["query_encoding"] = ENCODING_VERSION if self.query_encoding == "browser" else "legacy"
             details.update(session_mode=self.session_mode, session_index=self.sessions_created)
+            details.update(query_started_at=query_started_at,
+                           query_finished_at=datetime.now(timezone.utc).isoformat())
             self.last_query_diagnostics = details
             return details
 
@@ -209,9 +220,17 @@ class GoogleFlightsClient:
         except FlightsNotFound as exc:
             # This is Google's generic error payload, not evidence of no availability.
             self.consecutive_query_errors += 1
+            recognized_generic = (self.integration.diagnostics.get('http_status') == 200
+                                  and self.integration.diagnostics.get('upstream_error') is True)
             details = diagnostics("upstream_error", exc)
             details.update(upstream_error=True, response_kind="upstream_error")
             message = f"Google could not return results for {context}; availability is unknown."
+            if self.continue_generic_errors:
+                if recognized_generic:
+                    raise ApiError(message, diagnostics=details, search_url=self.last_search_url) from exc
+                details.update(category='unrecognized_provider_error')
+                raise ProviderUnavailableError(message + ' Experiment stopped on an unrecognized error.',
+                                               diagnostics=details, search_url=self.last_search_url) from exc
             if self.consecutive_query_errors >= MAX_CONSECUTIVE_QUERY_ERRORS:
                 raise ProviderUnavailableError(
                     message + f" Search stopped after {self.consecutive_query_errors} consecutive query errors.",

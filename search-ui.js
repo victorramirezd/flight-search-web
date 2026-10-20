@@ -3,7 +3,7 @@
   const finished = new Set(['ok', 'no_offers', 'error']);
   const effectiveStatus = q => finished.has(q.status) ? q.status : q.previous_status || q.status;
   const diagnosticKeys = ['category', 'http_status', 'response_kind', 'consent_handled', 'elapsed_ms',
-    'session_mode', 'session_index', 'http_requests', 'flight_get_requests', 'consent_post_requests', 'consent_refetch_requests', 'query_encoding', 'request_interval_seconds', 'start_gap_ms', 'exception_type', 'upstream_error', 'consecutive_errors', 'retry_after_seconds', 'result_count', 'google_error_payload'];
+    'query_started_at', 'query_finished_at', 'session_mode', 'session_index', 'http_requests', 'flight_get_requests', 'consent_post_requests', 'consent_refetch_requests', 'query_encoding', 'request_interval_seconds', 'start_gap_ms', 'exception_type', 'upstream_error', 'consecutive_errors', 'retry_after_seconds', 'result_count', 'google_error_payload'];
   const safeDiagnostics = value => Object.fromEntries(diagnosticKeys
     .filter(key => value && ['string', 'number', 'boolean'].includes(typeof value[key]))
     .map(key => [key, value[key]]));

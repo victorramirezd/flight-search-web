@@ -270,3 +270,35 @@ The [18 October session comparison](docs/search-session-experiment-2026-10-18.md
 did not demonstrate a reliability improvement from fresh sessions; shared remains
 the default. US passes required no consent requests; local fresh sessions incurred
 additional consent submissions and refetches.
+
+## Five-order deterioration experiment
+
+`POST /api/search` optionally accepts
+`experiment: {"departure_order": ["YYYY-MM-DD", ...], "continue_generic_errors": true}`.
+Both fields are required when the object is present. The departure list must be
+an exact permutation of the selected plan's departures; return dates remain
+chronological within each departure. Experiment requests are capped at 25 pairs.
+Only recognized Google generic errors in HTTP 200 may continue beyond the normal
+three-error stop. Blocking, transport, consent and parser failures still stop.
+Ordinary searches keep their existing order and error limit.
+
+The fixed protocol uses 25 LIM→MIL date pairs (10–14 December 2026, 14–18-day
+stays), five cyclic departure-group orders, shared sessions per ordering,
+1.5-second pacing and 300-second cooldowns. It does not use browser fallback.
+Set `FLIGHT_SEARCH_PASSWORD` in the environment and provide the deployed commit:
+
+```sh
+.venv-google/bin/python -m pip install matplotlib  # Local report tooling only
+.venv-google/bin/python scripts/compare_search_pacing.py --five-order \
+  --expected-revision '<full deployed commit>' --expected-region iad1 \
+  --output-dir work/diagnostics/five-order-comparison
+```
+
+The runner verifies advertised and actual query order, deployment metadata,
+settings, session identity and HTTP counters. It saves events after each query,
+prints cooldown updates every 30 seconds, and preserves partial results on
+cancellation or interruption. Existing run directories cannot be overwritten.
+`report.md`, `analysis.json`, PNG/SVG charts and raw NDJSON are generated locally;
+passwords and Google session cookies are excluded. Completed queries have actual
+UTC start/finish timestamps. Pending or interrupted outcomes never count as
+completed observations or absent flights. No automatic resume or retry occurs.

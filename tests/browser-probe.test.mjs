@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {validateUrls, summarizeHtml, comparePair} from '../browser-probe.mjs';
+import {validateUrls, summarizeHtml, comparePair, readFareCards} from '../browser-probe.mjs';
 import handler from '../api/browser_probe.mjs';
 import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
@@ -15,6 +15,13 @@ for (const bad of [[], [url,url], null, ['http://www.google.com/travel/flights?t
 assert.deepEqual(summarizeHtml('<script class="ds:1">SECRET errorHasStatus: true</script>',200),
   {http_status:200,has_results_script:true,upstream_error:true,flight_card_count:0});
 assert.equal(JSON.stringify(summarizeHtml('SECRET_COOKIE_AND_HTML',200)).includes('SECRET'),false);
+
+globalThis.location={pathname:'/travel/flights'};
+globalThis.document={querySelector(){return null;},querySelectorAll(){return [{querySelector(){return {textContent:''};}}];}};
+assert.equal(readFareCards(),null,'empty price elements are not completed results');
+globalThis.document.querySelectorAll=()=>[{querySelector(){return {textContent:'\u200e€147'};}}];
+assert.deepEqual(readFareCards().price_labels,['€147']);
+delete globalThis.location;delete globalThis.document;
 
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => ({status:200,text:async()=>'<script class="ds:1">errorHasStatus: true</script>'});

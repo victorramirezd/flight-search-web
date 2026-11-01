@@ -24,6 +24,20 @@ export function summarizeHtml(html, status) {
     flight_card_count: (html.match(/class=["']pIav2d["']/g) || []).length};
 }
 
+// Self-contained so the same readiness rule runs in Chromium and in unit checks.
+export function readFareCards(includeEmpty = false) {
+  const challenge = /\/sorry\//.test(location.pathname) || !!document.querySelector('iframe[src*="recaptcha"]');
+  const cards = Array.from(document.querySelectorAll('li.pIav2d'));
+  const labels = cards.map(card => card.querySelector('.YMlIz')?.textContent?.
+    replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim() || '');
+  const prices = labels.filter(text => /^€[\s\d,.]+$/.test(text) && /\d/.test(text));
+  if (!includeEmpty && !challenge && !prices.length) return null;
+  return {outcome: challenge ? 'challenge' : prices.length ? 'priced_cards' : 'no_priced_cards',
+    flight_card_count: cards.length, priced_card_count: prices.length, price_labels: prices.slice(0, 20),
+    candidate_price_labels: labels.filter(text => /^[€$£\s\d.,]+$/.test(text)).slice(0, 20),
+    initial_upstream_error: /errorHasStatus\s*:\s*true/.test(document.querySelector('script.ds\\:1')?.textContent || '')};
+}
+
 export async function comparePair(browser, url) {
   const started = Date.now();
   const userAgent = await browser.userAgent();
@@ -52,20 +66,11 @@ export async function comparePair(browser, url) {
         page.evaluate(() => document.querySelector('form[action="https://consent.google.com/save"] input[name="set_eom"][value="true"]').form.submit())]);
     }
     try {
-      await page.waitForFunction(() => document.querySelector('li.pIav2d .YMlIz') ||
-        /\/sorry\//.test(location.pathname) || document.querySelector('iframe[src*="recaptcha"]'),
-        {timeout: 20000});
+      await page.waitForFunction(readFareCards, {timeout: 20000});
     } catch (error) {
       if (error.name !== 'TimeoutError') throw error;
     }
-    const observed = await page.evaluate(() => {
-      const challenge = /\/sorry\//.test(location.pathname) || !!document.querySelector('iframe[src*="recaptcha"]');
-      const prices = Array.from(document.querySelectorAll('li.pIav2d')).map(card =>
-        card.querySelector('.YMlIz')?.textContent?.trim()).filter(text => /^€[\s\d,.]+$/.test(text || ''));
-      return {outcome: challenge ? 'challenge' : prices.length ? 'priced_cards' : 'no_priced_cards',
-        priced_card_count: prices.length, price_labels: prices.slice(0, 20),
-        initial_upstream_error: /errorHasStatus\s*:\s*true/.test(document.querySelector('script.ds\\:1')?.textContent || '')};
-    });
+    const observed = await page.evaluate(readFareCards, true);
     const browserResult = {...observed, consent_handled: consentHandled, requests,
       shopping_responses: rpcResponses, elapsed_ms: Date.now() - browserStart};
     // A delayed HTTP control helps distinguish elapsed time from browser fetching.

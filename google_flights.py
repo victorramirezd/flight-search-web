@@ -16,6 +16,7 @@ from fast_flights import FlightQuery, Passengers, create_query, get_flights
 from fast_flights.exceptions import FlightsNotFound
 from fast_flights.integrations.base import FetchIntegration
 from primp import Client
+from requests import Session
 from selectolax.lexbor import LexborHTMLParser
 
 from google_query import ENCODING_VERSION, with_browser_encoding
@@ -32,6 +33,19 @@ def validate_fetch_path(value):
     if not isinstance(value, str) or value not in {'root', 'search'}:
         raise ValueError("fetch_path must be 'root' or 'search'.")
     return value
+
+
+def validate_http_transport(value):
+    if not isinstance(value, str) or value not in {'primp', 'requests'}:
+        raise ValueError("http_transport must be 'primp' or 'requests'.")
+    return value
+
+
+class RequestsClient(Session):
+    """Alternative transport for controlled diagnostics; no implicit retries."""
+    def request(self, method, url, **kwargs):
+        kwargs.setdefault('timeout', 30)
+        return super().request(method, url, **kwargs)
 
 
 def validate_session_mode(value):
@@ -78,9 +92,10 @@ def empty_diagnostics():
 class ConsentAwareFetcher(FetchIntegration):
     """Adapted from the flight-search skill's bundled search_flights.py helper."""
 
-    def __init__(self, *, fetch_path='root'):
+    def __init__(self, *, fetch_path='root', http_transport='primp'):
         self.fetch_path = validate_fetch_path(fetch_path)
-        self.client = Client(
+        self.http_transport = validate_http_transport(http_transport)
+        self.client = RequestsClient() if self.http_transport == 'requests' else Client(
             impersonate="chrome_145", impersonate_os="macos", timeout=30,
             cookie_store=True,
         )
@@ -172,7 +187,8 @@ class GoogleFlightsClient:
                  exclude_self_transfers: bool = True,
                  request_interval_seconds: float = REQUEST_INTERVAL_SECONDS,
                  query_encoding: str = "browser", session_mode: str = "shared",
-                 continue_generic_errors: bool = False, fetch_path: str = 'root'):
+                 continue_generic_errors: bool = False, fetch_path: str = 'root',
+                 http_transport: str = 'primp'):
         if not isinstance(continue_generic_errors, bool):
             raise ValueError('continue_generic_errors must be a boolean')
         self.continue_generic_errors = continue_generic_errors
@@ -183,7 +199,8 @@ class GoogleFlightsClient:
         self.session_mode = validate_session_mode(session_mode)
         self.request_interval_seconds = validate_request_interval_seconds(request_interval_seconds)
         self.fetch_path = validate_fetch_path(fetch_path)
-        self.integration = ConsentAwareFetcher(fetch_path=self.fetch_path)
+        self.http_transport = validate_http_transport(http_transport)
+        self.integration = ConsentAwareFetcher(fetch_path=self.fetch_path, http_transport=self.http_transport)
         self.sessions_created = 1
         self.min_connections = min_connections
         self.max_connections = max_connections
@@ -222,7 +239,7 @@ class GoogleFlightsClient:
         # Replace only the Google HTTP client/cookie jar; pacing and the error
         # streak belong to the whole pass and must survive session replacement.
         if self.session_mode == 'fresh' and previous_request_at is not None:
-            self.integration = ConsentAwareFetcher(fetch_path=self.fetch_path)
+            self.integration = ConsentAwareFetcher(fetch_path=self.fetch_path, http_transport=self.http_transport)
             self.sessions_created += 1
         self.integration.diagnostics = empty_diagnostics()
         self.last_request_at = time.monotonic()
@@ -241,6 +258,7 @@ class GoogleFlightsClient:
             details["query_encoding"] = ENCODING_VERSION if self.query_encoding == "browser" else "legacy"
             details.update(session_mode=self.session_mode, session_index=self.sessions_created)
             details['fetch_path'] = self.fetch_path
+            details['http_transport'] = self.http_transport
             details.update(query_started_at=query_started_at,
                            query_finished_at=datetime.now(timezone.utc).isoformat())
             self.last_query_diagnostics = details

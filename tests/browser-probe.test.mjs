@@ -21,6 +21,8 @@ globalThis.document={querySelector(){return null;},querySelectorAll(){return [{q
 assert.equal(readFareCards(),null,'empty price elements are not completed results');
 globalThis.document.querySelectorAll=()=>[{querySelector(){return {textContent:'\u200e€147'};}}];
 assert.deepEqual(readFareCards().price_labels,['€147']);
+globalThis.document.querySelectorAll=()=>[{querySelector(){return {textContent:'251'};},innerText:'Turkish Airlines\n€251\nround trip'}];
+assert.deepEqual(readFareCards().price_labels,['€251'],'visible card text remains readable when currency markup changes');
 delete globalThis.location;delete globalThis.document;
 
 const originalFetch = globalThis.fetch;

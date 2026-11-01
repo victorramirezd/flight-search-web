@@ -31,7 +31,8 @@ export function readFareCards(includeEmpty = false) {
   const labels = cards.map(card => {
     const text = (card.querySelector('.YMlIz')?.textContent || card.innerText || '').
       replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim();
-    return text.match(/€\s*\d[\d,.]*/)?.[0] || '';
+    return text.match(/€\s*\d[\d,.]*/)?.[0] ||
+      (card.innerText || '').match(/€\s*\d[\d,.]*/)?.[0] || '';
   });
   const prices = labels.filter(text => /^€[\s\d,.]+$/.test(text) && /\d/.test(text));
   if (!includeEmpty && !challenge && !prices.length) return null;

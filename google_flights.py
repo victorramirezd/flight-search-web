@@ -82,7 +82,7 @@ class ConsentAwareFetcher(FetchIntegration):
     def fetch_html(self, query):
         self.diagnostics = empty_diagnostics()
         params = query.params() if not isinstance(query, str) else {"q": query}
-        url = "https://www.google.com/travel/flights"
+        url = "https://www.google.com/travel/flights/search"
         try:
             self.diagnostics['http_requests'] += 1
             self.diagnostics['flight_get_requests'] += 1

@@ -290,6 +290,7 @@ class ConsentTest(unittest.TestCase):
         self.assertEqual(fetcher.client.post.call_args.kwargs["data"],
                          {"set_eom": "true", "token": "example"})
         self.assertEqual(fetcher.client.get.call_args_list[0], fetcher.client.get.call_args_list[1])
+        self.assertEqual(fetcher.client.get.call_args.args[0], "https://www.google.com/travel/flights/search")
 
     def test_missing_results_and_http_failure_are_errors(self):
         for response in [SimpleNamespace(status_code=200, text="<html>Blocked</html>"),

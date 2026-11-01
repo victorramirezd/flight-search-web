@@ -28,6 +28,12 @@ REQUEST_COUNTERS = ('http_requests', 'flight_get_requests', 'consent_post_reques
                     'consent_refetch_requests')
 
 
+def validate_fetch_path(value):
+    if not isinstance(value, str) or value not in {'root', 'search'}:
+        raise ValueError("fetch_path must be 'root' or 'search'.")
+    return value
+
+
 def validate_session_mode(value):
     if not isinstance(value, str) or value not in {'shared', 'fresh'}:
         raise ValueError("session_mode must be 'shared' or 'fresh'.")
@@ -72,7 +78,8 @@ def empty_diagnostics():
 class ConsentAwareFetcher(FetchIntegration):
     """Adapted from the flight-search skill's bundled search_flights.py helper."""
 
-    def __init__(self):
+    def __init__(self, *, fetch_path='root'):
+        self.fetch_path = validate_fetch_path(fetch_path)
         self.client = Client(
             impersonate="chrome_145", impersonate_os="macos", timeout=30,
             cookie_store=True,
@@ -83,6 +90,8 @@ class ConsentAwareFetcher(FetchIntegration):
         self.diagnostics = empty_diagnostics()
         params = query.params() if not isinstance(query, str) else {"q": query}
         url = "https://www.google.com/travel/flights"
+        if self.fetch_path == 'search':
+            url += '/search'
         try:
             self.diagnostics['http_requests'] += 1
             self.diagnostics['flight_get_requests'] += 1
@@ -163,7 +172,7 @@ class GoogleFlightsClient:
                  exclude_self_transfers: bool = True,
                  request_interval_seconds: float = REQUEST_INTERVAL_SECONDS,
                  query_encoding: str = "browser", session_mode: str = "shared",
-                 continue_generic_errors: bool = False):
+                 continue_generic_errors: bool = False, fetch_path: str = 'root'):
         if not isinstance(continue_generic_errors, bool):
             raise ValueError('continue_generic_errors must be a boolean')
         self.continue_generic_errors = continue_generic_errors
@@ -173,7 +182,8 @@ class GoogleFlightsClient:
         self.query_encoding = query_encoding
         self.session_mode = validate_session_mode(session_mode)
         self.request_interval_seconds = validate_request_interval_seconds(request_interval_seconds)
-        self.integration = ConsentAwareFetcher()
+        self.fetch_path = validate_fetch_path(fetch_path)
+        self.integration = ConsentAwareFetcher(fetch_path=self.fetch_path)
         self.sessions_created = 1
         self.min_connections = min_connections
         self.max_connections = max_connections
@@ -212,7 +222,7 @@ class GoogleFlightsClient:
         # Replace only the Google HTTP client/cookie jar; pacing and the error
         # streak belong to the whole pass and must survive session replacement.
         if self.session_mode == 'fresh' and previous_request_at is not None:
-            self.integration = ConsentAwareFetcher()
+            self.integration = ConsentAwareFetcher(fetch_path=self.fetch_path)
             self.sessions_created += 1
         self.integration.diagnostics = empty_diagnostics()
         self.last_request_at = time.monotonic()
@@ -230,6 +240,7 @@ class GoogleFlightsClient:
                            start_gap_ms=start_gap_ms)
             details["query_encoding"] = ENCODING_VERSION if self.query_encoding == "browser" else "legacy"
             details.update(session_mode=self.session_mode, session_index=self.sessions_created)
+            details['fetch_path'] = self.fetch_path
             details.update(query_started_at=query_started_at,
                            query_finished_at=datetime.now(timezone.utc).isoformat())
             self.last_query_diagnostics = details

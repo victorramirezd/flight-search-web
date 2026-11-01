@@ -16,7 +16,8 @@ if str(ROOT_DIR) not in sys.path:
 from flight_search import (ApiError, build_search_config, iter_search_rows, search_queries,
                            validate_retry_queries)
 from google_flights import (GoogleFlightsClient, REQUEST_INTERVAL_SECONDS,
-                            REQUEST_COUNTERS, validate_request_interval_seconds, validate_session_mode)
+                            REQUEST_COUNTERS, validate_request_interval_seconds, validate_session_mode,
+                            validate_fetch_path)
 
 
 SEARCH_PASSWORD = "victor"
@@ -100,6 +101,7 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             session_mode = validate_session_mode(data.get('session_mode', 'shared'))
+            fetch_path = validate_fetch_path(data.get('fetch_path', 'root'))
             query_encoding = data.get("query_encoding", "browser")
             if not isinstance(query_encoding, str) or query_encoding not in {"browser", "legacy"}:
                 raise ValueError("query_encoding must be 'browser' or 'legacy'.")
@@ -137,7 +139,8 @@ class handler(BaseHTTPRequestHandler):
         request_id = str(uuid.uuid4())
         metadata = {"request_id": request_id, **deployment_metadata(),
                     "request_interval_seconds": request_interval_seconds,
-                    "query_encoding": query_encoding, "session_mode": session_mode}
+                    "query_encoding": query_encoding, "session_mode": session_mode,
+                    "fetch_path": fetch_path}
         if experiment is not None:
             metadata['experiment'] = experiment
         rows = []
@@ -149,6 +152,7 @@ class handler(BaseHTTPRequestHandler):
                 event["diagnostics"] = {**event.get("diagnostics", {}),
                                         "request_interval_seconds": request_interval_seconds,
                                         "session_mode": session_mode,
+                                        "fetch_path": fetch_path,
                                         "query_encoding": event.get("diagnostics", {}).get("query_encoding", query_encoding)}
             ledger[event["query_id"]].update(event)
             if event["status"] != "running":
@@ -190,6 +194,7 @@ class handler(BaseHTTPRequestHandler):
                 request_interval_seconds=request_interval_seconds,
                 query_encoding=query_encoding,
                 session_mode=session_mode,
+                fetch_path=fetch_path,
                 continue_generic_errors=bool(experiment and experiment['continue_generic_errors']),
             )
             for row in iter_search_rows(client, config, queries=plan, on_progress=report_progress):

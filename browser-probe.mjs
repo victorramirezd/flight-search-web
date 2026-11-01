@@ -64,8 +64,20 @@ export async function comparePair(browser, url) {
         priced_card_count: prices.length, price_labels: prices.slice(0, 20),
         initial_upstream_error: /errorHasStatus\s*:\s*true/.test(document.querySelector('script.ds\\:1')?.textContent || '')};
     });
-    return {http, browser: {...observed, consent_handled: consentHandled, requests,
-      shopping_responses: rpcResponses, elapsed_ms: Date.now() - browserStart}, elapsed_ms: Date.now() - started};
+    const browserResult = {...observed, consent_handled: consentHandled, requests,
+      shopping_responses: rpcResponses, elapsed_ms: Date.now() - browserStart};
+    // A delayed HTTP control helps distinguish elapsed time from browser fetching.
+    let delayedHttp = null;
+    if (http.upstream_error && observed.outcome !== 'challenge') {
+      const delayedStart = Date.now();
+      try {
+        const delayed = await fetch(url, {headers: {'user-agent': userAgent, 'accept-language': 'en-US,en;q=0.9'},
+          signal: AbortSignal.timeout(15000), redirect: 'follow'});
+        delayedHttp = {...summarizeHtml(await delayed.text(), delayed.status), elapsed_ms: Date.now() - delayedStart};
+      } catch (error) { delayedHttp = {outcome: 'transport_error', error_type: error.name}; }
+    }
+    return {http, browser: browserResult, delayed_http: delayedHttp,
+      http_get_requests: delayedHttp ? 2 : 1, elapsed_ms: Date.now() - started};
   } finally {
     await context.close();
   }

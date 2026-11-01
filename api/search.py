@@ -44,8 +44,10 @@ def deployment_metadata():
     """Expose only deployment identifiers, never arbitrary environment values."""
     def safe(value, limit):
         return value[:limit] if value and re.fullmatch(r"[A-Za-z0-9_-]+", value) else None
-    return {"region": safe(os.environ.get("VERCEL_REGION"), 32) or "local",
-            "revision": safe(os.environ.get("VERCEL_GIT_COMMIT_SHA"), 40)}
+    return {"region": safe(os.environ.get("VERCEL_REGION"), 32)
+            or safe(os.environ.get("FLIGHT_SEARCH_REGION"), 32) or "local",
+            "revision": safe(os.environ.get("VERCEL_GIT_COMMIT_SHA"), 40)
+            or safe(os.environ.get("RENDER_GIT_COMMIT"), 40)}
 
 
 def diagnostic_log(event, request_id, **details):

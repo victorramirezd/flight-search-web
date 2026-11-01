@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: flight-search-network-test
+    runtime: python
+    repo: https://github.com/victorramirezd/flight-search-web
+    branch: codex/render-network-test
+    plan: free
+    region: virginia
+    autoDeployTrigger: "off"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py --host 0.0.0.0 --port "$PORT"
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: FLIGHT_SEARCH_REGION
+        value: render-virginia

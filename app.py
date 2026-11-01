@@ -49,14 +49,19 @@ class handler(SearchHandler):
         super().do_OPTIONS()
 
 
-if __name__ == "__main__":
+def server_options(argv=None):
     import argparse
 
     parser = argparse.ArgumentParser(description="Run the flight search website locally")
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
-    args = parser.parse_args()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
-    print(f"Flight search: http://127.0.0.1:{args.port}", flush=True)
+    return parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    args = server_options()
+    server = ThreadingHTTPServer((args.host, args.port), handler)
+    print(f"Flight search: http://{args.host}:{server.server_port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

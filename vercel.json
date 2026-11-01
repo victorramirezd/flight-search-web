@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/browser_probe.mjs": {
+      "maxDuration": 180,
+      "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
+    },
+    "api/*.py": {
+      "excludeFiles": "node_modules/**"
+    }
+  }
+}

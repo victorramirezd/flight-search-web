@@ -1,0 +1,9 @@
+{
+  "name": "flight-search-web-diagnostics",
+  "private": true,
+  "engines": {"node": "24.x"},
+  "dependencies": {
+    "@sparticuz/chromium": "153.0.0",
+    "puppeteer-core": "25.11.0"
+  }
+}

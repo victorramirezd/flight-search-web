@@ -19,7 +19,7 @@ export default async function handler(req, res) {
   const results = [];
   try {
     chromium.setGraphicsMode = false;
-    browser = await puppeteer.launch({args: puppeteer.defaultArgs({args: chromium.args, headless: 'shell'}),
+    browser = await puppeteer.launch({args: await puppeteer.defaultArgs({args: chromium.args, headless: 'shell'}),
       executablePath: await chromium.executablePath(), headless: 'shell', defaultViewport: {width: 1365, height: 900}});
     for (const url of urls) {
       const started = Date.now();

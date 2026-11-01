@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import {validateUrls, summarizeHtml, comparePair} from '../browser-probe.mjs';
+import handler from '../api/browser_probe.mjs';
+import chromium from '@sparticuz/chromium';
+import puppeteer from 'puppeteer-core';
 
 const url = 'https://www.google.com/travel/flights/search?tfs=ABC_123&hl=en&curr=EUR';
 assert.deepEqual(validateUrls([url]), [url]);
@@ -32,4 +35,20 @@ try {
     assert.equal(closed,1,'the per-query context must close on success and failure');
   }
 } finally { globalThis.fetch = originalFetch; }
+// Exercise the actual installed Puppeteer API without launching a local browser.
+const originalLaunch = puppeteer.launch;
+const originalPath = chromium.executablePath;
+let launchOptions;
+try {
+  chromium.executablePath = async () => '/test/chromium';
+  puppeteer.launch = async options => { launchOptions=options; throw new Error('controlled launch failure'); };
+  const res = {setHeader(){},status(){return this;},json(){}};
+  const originalError = console.error;
+  try {
+    console.error=()=>{};
+    await handler({method:'POST',body:{password:'victor',urls:[url]}},res);
+  } finally {console.error=originalError;}
+  assert.ok(Array.isArray(launchOptions.args),'resolve asynchronous defaultArgs before launching');
+  assert.equal(launchOptions.executablePath,'/test/chromium');
+} finally {puppeteer.launch=originalLaunch;chromium.executablePath=originalPath;}
 console.log('Browser probe URL boundaries, safe output and context cleanup checks passed');

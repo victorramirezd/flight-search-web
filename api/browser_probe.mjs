@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   if (String(body?.password || '').toLowerCase() !== 'victor') return res.status(401).json({error: 'Incorrect password.'});
   let urls;
   try { urls = validateUrls(body?.urls); }
-  catch { return res.status(400).json({error: 'Provide 1–3 English EUR Google Flights search URLs.'}); }
+  catch { return res.status(400).json({error: 'Provide one English EUR Google Flights search URL.'}); }
   const metadata = {region: process.env.VERCEL_REGION || 'local', revision: process.env.VERCEL_GIT_COMMIT_SHA || null};
   let browser;
   const results = [];

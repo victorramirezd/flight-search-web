@@ -6,7 +6,7 @@ import puppeteer from 'puppeteer-core';
 
 const url = 'https://www.google.com/travel/flights/search?tfs=ABC_123&hl=en&curr=EUR';
 assert.deepEqual(validateUrls([url]), [url]);
-for (const bad of [[], [url,url,url,url], null, ['http://www.google.com/travel/flights?tfs=ABC&hl=en&curr=EUR'],
+for (const bad of [[], [url,url], null, ['http://www.google.com/travel/flights?tfs=ABC&hl=en&curr=EUR'],
   [url.replace('www.google.com', 'evil.example')], [url.replace('/travel/flights/search', '/url')],
   [url+'&q=https://evil.example'], [url.replace('ABC_123','https://evil.example')],
   [url.replace('www.google.com','user:password@www.google.com')]]) {
@@ -23,16 +23,17 @@ try {
     let closed = 0;
     const page = {on(){}, async goto(){return {status:()=>200};}, async $(){return null;},
       async waitForFunction(){if(shouldFail) throw new Error('navigation failed');},
-      async evaluate(){return {outcome:'priced_cards',priced_card_count:1,price_labels:['€147']};}};
-    const browser = {async userAgent(){return 'test-browser';}, async createBrowserContext(){return {
-      async newPage(){return page;},async close(){closed++;}};}};
+      async evaluate(){return {outcome:'priced_cards',priced_card_count:1,price_labels:['€147']};},
+      async close(){closed++;}};
+    const browser = {async userAgent(){return 'test-browser';}, defaultBrowserContext(){return {
+      async newPage(){return page;}};}};
     if(shouldFail) await assert.rejects(comparePair(browser,url),/navigation failed/);
     else {
       const result = await comparePair(browser,url);
       assert.equal(result.http.upstream_error,true);
       assert.equal(result.browser.outcome,'priced_cards');
     }
-    assert.equal(closed,1,'the per-query context must close on success and failure');
+    assert.equal(closed,1,'the per-query page must close on success and failure');
   }
 } finally { globalThis.fetch = originalFetch; }
 // Exercise the actual installed Puppeteer API without launching a local browser.

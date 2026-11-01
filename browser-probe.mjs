@@ -1,7 +1,7 @@
 // This probe returns public fare-card observations only, never HTML or cookies.
 export function validateUrls(value) {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 3) {
-    throw new Error('Provide one to three Google Flights URLs.');
+  if (!Array.isArray(value) || value.length !== 1) {
+    throw new Error('Provide one Google Flights URL.');
   }
   return value.map(text => {
     if (typeof text !== 'string' || text.length > 8192) throw new Error('Invalid search URL.');
@@ -31,7 +31,9 @@ export async function comparePair(browser, url) {
   const response = await fetch(url, {headers: {'user-agent': userAgent, 'accept-language': 'en-US,en;q=0.9'},
     signal: AbortSignal.timeout(15000), redirect: 'follow'});
   const http = {...summarizeHtml(await response.text(), response.status), elapsed_ms: Date.now() - httpStart};
-  const context = await browser.createBrowserContext();
+  // Serverless Chromium uses single-process mode, which cannot create additional
+  // contexts reliably. Each probe launches its own browser for exactly one pair.
+  const context = browser.defaultBrowserContext();
   const page = await context.newPage();
   let requests = 0, rpcResponses = 0;
   page.on('request', () => requests++);
@@ -79,6 +81,6 @@ export async function comparePair(browser, url) {
     return {http, browser: browserResult, delayed_http: delayedHttp,
       http_get_requests: delayedHttp ? 2 : 1, elapsed_ms: Date.now() - started};
   } finally {
-    await context.close();
+    await page.close();
   }
 }

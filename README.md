@@ -302,3 +302,25 @@ cancellation or interruption. Existing run directories cannot be overwritten.
 passwords and Google session cookies are excluded. Completed queries have actual
 UTC start/finish timestamps. Pending or interrupted outcomes never count as
 completed observations or absent flights. No automatic resume or retry occurs.
+
+
+## Istanbul passenger-airport choices
+
+Choose **Istanbul (All airports)** to search IST and SAW together, or select
+Istanbul Airport (IST) / Sabiha Gökçen (SAW) individually. Atatürk (ISL) is excluded
+from passenger-search suggestions and rejected before querying Google because
+it no longer serves scheduled passenger flights.
+
+Google-specific additions and searchability corrections live in
+`data/google-location-overrides.json`, applied by the frontend and backend. The
+reviewed source airport catalogue and its Duffel audit remain unchanged.
+The explicit `IST_ALL` selector distinguishes the metropolitan search from the
+existing individual `IST` airport code; it is an application selector, not an
+IATA code. It maps to Google's observed Istanbul entity `/m/09949m` and preserves
+actual IST/SAW airport codes in itineraries and the transfer filter in links.
+
+A Google empty-results response can omit optional airline metadata. The adapter
+recognizes the observed empty shape before the upstream parser, returning no
+matching priced results rather than a fatal IndexError. Malformed responses and
+Google generic error payloads retain their existing error handling; an empty
+response still does not establish absent flights.

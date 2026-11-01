@@ -430,7 +430,16 @@ def best_offer_summary(
 @lru_cache(maxsize=1)
 def location_catalog() -> dict[str, dict]:
     with (Path(__file__).parent / "data" / "airports.json").open() as source:
-        return {place["code"]: place for place in json.load(source)}
+        places = {place["code"]: place for place in json.load(source)}
+    with (Path(__file__).parent / "data" / "google-location-overrides.json").open() as source:
+        overrides = json.load(source)
+    for code, changes in overrides.get('update', {}).items():
+        places[code] = {**places[code], **changes}
+    for place in overrides.get('add', []):
+        if place['code'] in places:
+            raise ValueError('Google location selector must not replace an airport code')
+        places[place['code']] = place
+    return places
 
 
 def known_location_codes() -> frozenset[str]:
@@ -444,8 +453,11 @@ def location_airport_codes(code: str) -> frozenset[str]:
 
 def validate_location_code(value: str, field: str) -> str:
     code = value.strip().upper()
-    if not re.fullmatch(r"[A-Z]{3}", code) or code not in known_location_codes():
+    if not re.fullmatch(r"[A-Z]{3}(?:_ALL)?", code) or code not in known_location_codes():
         raise ValueError(f"{field} must be a known city or airport IATA code; choose a suggestion (for example, Palermo is PMO)")
+    place = location_catalog()[code]
+    if place.get('searchable') is False:
+        raise ValueError(place['search_message'])
     return code
 
 

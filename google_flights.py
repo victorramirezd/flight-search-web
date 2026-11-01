@@ -6,6 +6,7 @@ Prices for those searches are indicative round-trip fares, not booked offers.
 from __future__ import annotations
 
 import math
+import json
 import re
 import time
 from datetime import date, datetime, timezone
@@ -43,6 +44,23 @@ def validate_request_interval_seconds(value):
 
 class FetchError(RuntimeError):
     """A safe explanation with no upstream response body or session data."""
+
+
+class EmptyFlightResults(Exception):
+    """Recognized Google empty response whose optional airline list is omitted."""
+
+
+def recognized_empty_results(script):
+    try:
+        payload = json.loads(script.split('data:', 1)[1].rsplit(',', 1)[0])
+        metadata = payload[7][1]
+        return (payload[2] is None and payload[3] is None
+                and isinstance(metadata, list) and len(metadata) == 1
+                and isinstance(metadata[0], list) and bool(metadata[0])
+                and all(isinstance(row, list) and len(row) == 2
+                        and all(isinstance(value, str) for value in row) for row in metadata[0]))
+    except (ValueError, IndexError, KeyError, TypeError, AttributeError):
+        return False
 
 
 def empty_diagnostics():
@@ -109,6 +127,9 @@ class ConsentAwareFetcher(FetchIntegration):
         self.diagnostics.update(category="upstream_error" if upstream_error else "success",
                                 response_kind="upstream_error" if upstream_error else "flights_results",
                                 upstream_error=upstream_error)
+        if not upstream_error and recognized_empty_results(script.text()):
+            self.diagnostics.update(response_kind='empty_results')
+            raise EmptyFlightResults
         return response.text
 
     def check_status(self, response):
@@ -217,6 +238,8 @@ class GoogleFlightsClient:
         context = f"departure {departure_date}, return {return_date or 'one-way'}"
         try:
             results = get_flights(query, integration=self.integration)
+        except EmptyFlightResults:
+            results = []
         except FlightsNotFound as exc:
             # This is Google's generic error payload, not evidence of no availability.
             self.consecutive_query_errors += 1

@@ -13,6 +13,7 @@ STATIC_FILES = {
     "/airports.js": ("airports.js", "text/javascript; charset=utf-8"),
     "/search-ui.js": ("search-ui.js", "text/javascript; charset=utf-8"),
     "/logo.png": ("logo.png", "image/png"),
+    "/data/google-location-overrides.json": ("data/google-location-overrides.json", "application/json"),
     "/data/airports.json": ("data/airports.json", "application/json; charset=utf-8"),
 }
 

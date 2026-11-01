@@ -76,7 +76,7 @@ class BrowserQueryTest(unittest.TestCase):
 
     def test_verified_city_mapping_has_valid_entities(self):
         for code, entity in city_entities().items():
-            self.assertRegex(code, '^[A-Z]{3}$')
+            self.assertRegex(code, '^[A-Z]{3}(?:_ALL)?$')
             self.assertRegex(entity['id'], '^/m/[a-zA-Z0-9_]+$')
             self.assertEqual(entity['type'], 3)
 

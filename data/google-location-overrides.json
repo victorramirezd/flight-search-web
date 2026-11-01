@@ -1,0 +1,34 @@
+{
+  "observed_on": "2026-11-01",
+  "source": "Google Flights city metadata; DHMI airport information and 2019 transfer report",
+  "add": [
+    {
+      "code": "IST_ALL",
+      "name": "Istanbul",
+      "city": "Istanbul",
+      "country": "TR",
+      "type": "city",
+      "label": "Istanbul - All airports (IST, SAW) - TR",
+      "selection_label": "Istanbul (All airports)",
+      "airport_codes": [
+        "IST",
+        "SAW"
+      ],
+      "aliases": [
+        "İstanbul",
+        "Istanbul all airports"
+      ]
+    }
+  ],
+  "update": {
+    "ISL": {
+      "searchable": false,
+      "search_message": "Atatürk (ISL) does not serve scheduled passenger flights. Choose Istanbul (All airports), Istanbul Airport (IST), or Sabiha Gökçen (SAW)."
+    }
+  },
+  "sources": [
+    "https://www.dhmi.gov.tr/Sayfalar/Havalimani/Istanbul/GenelBilgiler.aspx",
+    "https://www.sgairport.com/en/general-information-about-the-airport/",
+    "https://www.dhmi.gov.tr/Lists/AnnualReports/Attachments/13/2019.pdf"
+  ]
+}

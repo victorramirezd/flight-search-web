@@ -792,7 +792,7 @@
             option.id = `${list.id}-${index}`;
             option.setAttribute("role", "option");
             option.setAttribute("aria-selected", "false");
-            option.textContent = `${place.city || place.name} (${place.code}) — ${place.type === "city" ? "All airports" : place.name} · ${place.country}`;
+            option.textContent = `${AirportSearch.label(place)} — ${place.type === "city" ? "All airports" : place.name} · ${place.country}`;
             option.addEventListener("mousedown", event => event.preventDefault());
             option.addEventListener("click", () => select(index));
             list.append(option);
@@ -1042,13 +1042,11 @@
 
       async function loadAirports() {
         try {
-          const response = await fetch("/data/airports.json");
-          if (!response.ok) {
-            throw new Error("Airport list unavailable.");
-          }
-          const airports = await response.json();
-          airportChoices = airports;
-          airportCatalog = AirportSearch.createCatalog(airports);
+          const responses = await Promise.all([fetch("/data/airports.json"), fetch("/data/google-location-overrides.json")]);
+          if (responses.some(response => !response.ok)) throw new Error("Airport list unavailable.");
+          const [airports, overrides] = await Promise.all(responses.map(response => response.json()));
+          airportCatalog = AirportSearch.createCatalog(airports, overrides);
+          airportChoices = airportCatalog.places;
           status.textContent = `${airports.length.toLocaleString()} city and airport choices loaded`;
           await detectOriginFromCoordinates();
         } catch (error) {
@@ -1295,7 +1293,7 @@
         currentSearch = new FlightUI.SearchState(formPayload());
         selectedCalendarId = null;
         const config = currentSearch.config;
-        document.querySelector("#searchSummary").textContent = `${config.origin} → ${config.destination} · ${config.one_way ? "One way" : "Round trip"} · ${config.target_date} ± ${config.date_flex_days} days · ${config.exclude_self_transfers ? "Self-transfers and separate tickets excluded" : "Self-transfers and separate tickets included"}`;
+        document.querySelector("#searchSummary").textContent = `${airportCatalog.resolve(config.origin)?.selection_label || config.origin} → ${airportCatalog.resolve(config.destination)?.selection_label || config.destination} · ${config.one_way ? "One way" : "Round trip"} · ${config.target_date} ± ${config.date_flex_days} days · ${config.exclude_self_transfers ? "Self-transfers and separate tickets excluded" : "Self-transfers and separate tickets included"}`;
         status.textContent = "";
         await runSearch();
       });

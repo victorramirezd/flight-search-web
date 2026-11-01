@@ -22,3 +22,22 @@ const renamed = createCatalog([{code: 'PMO', city: 'Palermo', name: 'Palermo Air
   type: 'large_airport', aliases: ['Falcone Borsellino']}]);
 assert.equal(renamed.search('Falcone Borsellino')[0].code, 'PMO');
 assert.equal(renamed.resolve('Falcone Borsellino').code, 'PMO');
+
+const overrides = require('../data/google-location-overrides.json');
+const googleCatalog = createCatalog(places, overrides);
+const istanbul = googleCatalog.search('Istanbul');
+assert.equal(istanbul[0].code, 'IST_ALL');
+assert.equal(label(istanbul[0]), 'Istanbul (All airports)');
+assert.deepEqual(istanbul[0].airport_codes, ['IST', 'SAW']);
+assert.ok(istanbul.some(place => place.code === 'IST'));
+assert.ok(istanbul.some(place => place.code === 'SAW'));
+assert.ok(!istanbul.some(place => place.code === 'ISL'));
+assert.equal(googleCatalog.resolve('ISL'), null);
+assert.equal(googleCatalog.resolve('Istanbul (All airports)').code, 'IST_ALL');
+assert.equal(googleCatalog.resolve('IST').type, 'large_airport');
+assert.equal(googleCatalog.resolve('SAW').type, 'large_airport');
+assert.equal(googleCatalog.resolve('İstanbul'), null, 'ambiguous text still requires selection');
+assert.equal(places.find(place => place.code === 'ISL').searchable, undefined, 'audited catalog is not mutated');
+for (const place of googleCatalog.places) assert.equal(googleCatalog.resolve(label(place)).code, place.code);
+assert.throws(() => createCatalog(places, {add: [{code: 'IST'}]}), /replace/);
+console.log('Istanbul metropolitan selection, individual airports and inactive-airport checks passed');

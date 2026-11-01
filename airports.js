@@ -1,10 +1,10 @@
-/* Location labels are presentation; only catalog IATA codes enter requests. */
+/* Location labels are presentation; only known catalog selectors enter requests. */
 (function (root) {
   function normalize(value) {
     return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   }
-  function label(place) { return `${place.city || place.name} (${place.code})`; }
+  function label(place) { return place.selection_label || `${place.city || place.name} (${place.code})`; }
   function editDistance(a, b) {
     let previous = Array.from({length: b.length + 1}, (_, i) => i);
     for (let i = 1; i <= a.length; i++) {
@@ -15,7 +15,15 @@
     }
     return previous[b.length];
   }
-  function createCatalog(places) {
+  function createCatalog(places, overrides = {}) {
+    const updated = places.map(place => ({...place, ...(overrides.update?.[place.code] || {})}));
+    const codes = new Set(updated.map(place => place.code));
+    for (const place of overrides.add || []) {
+      if (codes.has(place.code)) throw new Error('Google location selector must not replace an airport code');
+      updated.push({...place});
+      codes.add(place.code);
+    }
+    places = updated.filter(place => place.searchable !== false);
     const entries = places.map(place => ({place, code: normalize(place.code),
       city: normalize(place.city), name: normalize(place.name),
       text: normalize([place.code, place.city, place.name, place.country, place.label, ...(place.aliases || [])].join(' '))}));
@@ -55,7 +63,7 @@
       if (matches.length === 1) return matches[0].place;
       return null;
     }
-    return {search, resolve};
+    return {search, resolve, places};
   }
   root.AirportSearch = {normalize, label, createCatalog};
   if (typeof module !== 'undefined') module.exports = root.AirportSearch;
